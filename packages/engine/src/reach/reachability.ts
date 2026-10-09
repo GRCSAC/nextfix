@@ -5,7 +5,13 @@ import type { CallSiteRef, Component, PathHop, ReachPath, ReachResult, SymbolEnt
 function matches(c: CallSite, pkg: string, entry: SymbolEntry): string | undefined {
   const t = c.target;
   if (t.kind === 'external' && t.package === pkg && !entry.receiver) {
-    return entry.symbols.includes(t.symbol) ? t.symbol : undefined;
+    if (entry.symbols.includes(t.symbol)) return t.symbol;
+    // Calling the package itself (`marked(src)`) reaches an export named after the package
+    // (`export function marked`) or its `default`.
+    const base = pkg.replace(/^@[^/]+\//, '');
+    if (t.symbol === 'default' && entry.symbols.includes(base)) return base;
+    if (t.symbol === base && entry.symbols.includes('default')) return 'default';
+    return undefined;
   }
   if (t.kind === 'framework' && t.package === pkg && entry.receiver === t.receiver) {
     return entry.symbols.includes(t.symbol) ? t.symbol : undefined;

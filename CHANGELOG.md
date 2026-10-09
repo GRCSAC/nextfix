@@ -5,6 +5,26 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-09
+
+### Added
+- **Cross-file symbol resolution.** Derived symbols are now carried from the file the fix
+  touched up through the package's import graph to its entry file: `package.json` is located
+  from the touched file upward, the entry is chosen source-first (`source`, `src/index`,
+  `src/<name>`, `module`, `exports`, `main`, …), the import graph is walked breadth-first from
+  the entry, and tainted names flow through named and namespace imports, `export … from`
+  barrels, `module.exports = require()`, class methods to their class, and module-level
+  variables to whatever references them. The result is the package's public names: moment's
+  locale path-traversal fix in an internal file now derives to `locale`, `defineLocale`,
+  `updateLocale` and the parsers that read locale config; marked's module-level regex fixes
+  derive to `marked`, `parse`, `lexer`, …; qs's internal `parseObject` derives to `parse`.
+- A call to the package itself (`marked(src)`) matches an export named after the package.
+- Evidence records the entry file the symbols were resolved through.
+
+### Fixed
+- `var parseKeys = function parseQueryStringKeys()` is known by the variable name callers use.
+- Import resolution probes `.js` first and no longer spends the file budget depth-first.
+
 ## [0.4.1] — 2026-10-09
 
 First validation against real applications (OWASP Juice Shop, OWASP NodeGoat, Hackathon

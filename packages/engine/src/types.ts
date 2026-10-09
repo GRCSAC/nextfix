@@ -46,6 +46,8 @@ export interface SymbolEvidence {
   resolvedVia: Record<string, string>;
   /** The fix repository name contains the package name. */
   repoMatch: boolean;
+  /** Package entry file the symbols were resolved through, when cross-file resolution succeeded. */
+  entry?: string;
   derivedAt: string;
 }
 

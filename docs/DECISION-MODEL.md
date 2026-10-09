@@ -47,9 +47,16 @@ commit, automated), `package-level` (tiers 1–3).
    function that is public contributes itself and its immediate public callers; a changed
    internal function contributes public callers up to three hops away, where passing a
    function as an argument counts as a call.
-5. If nothing resolves but the file's default export is itself a function, the symbol is
+5. **Across files.** The package's `package.json` is found from the touched file upward and
+   an entry file chosen source-first. The import graph is walked breadth-first from the entry
+   (at most 200 files). The changed names are then carried toward the entry: a file's
+   functions that call or reference them (and the classes those methods belong to), the
+   file's public names for those, then each importer's local bindings for those names, with
+   `export … from` barrels and `module.exports = require()` passing names through unchanged.
+   The entry file's public names that are reached are the package's symbols.
+6. If nothing resolves but the file's default export is itself a function, the symbol is
    `default` (the package is one callable).
-6. Failures are remembered for seven days so scans do not retry every time; `nextfix symbols
+7. Failures are remembered for seven days so scans do not retry every time; `nextfix symbols
    forget` clears one.
 
 Curated entries always outrank derived ones for the same advisory. `nextfix symbols confirm`
@@ -121,7 +128,9 @@ The score never changes a decision; it orders findings within a decision.
   the found path. It is a hint: on Juice Shop it flags the challenge-notification chain because
   `req` enters the handler, not because request data reaches the sanitizer.
 - Bundlers and tree-shaking are ignored: "present" means "in the lockfile".
-- Derived symbols are resolved within the file the fix touched. Packages that assemble their
-  public API elsewhere (many ESM libraries) can yield internal names; those entries are
-  still useful for call matching only when the user code imports that internal path.
+- Cross-file resolution over-approximates on purpose: every public function that can reach the
+  changed code counts (moment's `months()` reads locale config, so it is listed with
+  `locale`). The decision still depends on whether *your* code calls one of them.
+- Built entry files (`lib/*.cjs`, `dist/`) are tried after source entries; a repo whose only
+  entry is a build artifact that does not import its sources falls back to per-file symbols.
 - Advisories without a GitHub fix link in OSV stay `imported-unknown-symbol`.

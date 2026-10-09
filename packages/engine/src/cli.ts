@@ -102,6 +102,7 @@ async function symbolsCommand(args: string[], opts: { force: boolean; offline: b
           console.log(`  commit:  ${out.entry.evidence.commits.join(', ')}`);
           console.log(`  files:   ${out.entry.evidence.files.join(', ')}`);
           console.log(`  changed: ${out.entry.evidence.changedFunctions.join(', ')}`);
+          if (out.entry.evidence.entry) console.log(`  entry:   ${out.entry.evidence.entry}`);
           console.log(`  via:     ${Object.entries(out.entry.evidence.resolvedVia).map(([s, v]) => `${s}←${v}`).join(', ')}`);
         }
       } else {

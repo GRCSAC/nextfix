@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.4.1` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.5.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -128,8 +128,10 @@ node packages/engine/src/cli.ts symbols export reviewed.json                # co
 ```
 
 Set `GITHUB_TOKEN` to lift GitHub's unauthenticated limit; `--no-derive` skips the step.
-Derivation is per file: a package whose public API is assembled in a different file from the
-one the fix touched can come back with internal names or nothing, and NextFix says so.
+Derivation then follows the package's import graph from its entry file, so a fix in an
+internal module is reported as the public names that reach it (moment's locale fix as
+`moment.locale`, marked's regex fix as `marked`/`parse`). When no entry export reaches the
+change, NextFix says so rather than guessing.
 
 ### Per-project settings
 
@@ -179,9 +181,7 @@ derivation on (NextFix 0.4.1). "Routes" is what `grep` finds in the main routes 
 What the first pass got wrong, and what changed because of it, is in the 0.4.1 entry of
 [CHANGELOG.md](CHANGELOG.md). What is still open: handlers NextFix cannot follow are listed
 per entry point as `unresolvedHandlers` (11 of 107 on Juice Shop, mostly third-party
-middleware factories), the request-data hint is coarse (any `req.*` in the chain counts),
-and `marked`-style advisories whose fix touches module-level tables in a multi-export file
-stay at `imported-unknown-symbol`.
+middleware factories), and the request-data hint is coarse (any `req.*` in the chain counts).
 
 Juice Shop needed one line of `nextfix.config.json` to ignore `data/static/codefixes`, a
 folder of challenge snippets that re-declare the server's routes without their imports.

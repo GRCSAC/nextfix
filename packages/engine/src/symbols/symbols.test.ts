@@ -123,6 +123,16 @@ lodash.zipObjectDeep = zipObjectDeep;
   assert.deepEqual([...resolvePublic(f, enclosing(f, 2)!).keys()], ['zipObjectDeep']);
 });
 
+test('a named function expression assigned to a variable is known by the variable name', () => {
+  const src = `
+var parseObject = function (chain, val) { return val; };
+var parseKeys = function parseQueryStringKeys(key, val) { return parseObject([key], val); };
+module.exports = function (str, opts) { return parseKeys(str, opts); };
+`;
+  const f = analyzeFile(src, 'lib/parse.js');
+  assert.deepEqual([...resolvePublic(f, enclosing(f, 2)!).keys()], ['default']);
+});
+
 test('esm exports are public', () => {
   const src = `
 export function trim(s) { return s.trim(); }

@@ -39,16 +39,20 @@ advisories reproduced, 12 of 14 uncurated advisories gained function data.
 that found (see CHANGELOG). Coverage per routes file is now 87–96% of the registrations.
 
 Still open from this phase:
-- Resolve a package's public API across files (entry `main`/`exports` → re-exports), so ESM
-  libraries like moment yield `moment.locale` rather than the internal `getLocale`, and
-  `marked`-style module-level fixes attribute to the exported callable.
 - Real taint: track which argument carries request data instead of "req appears in the chain".
 - Group duplicate components (same name@version at several lockfile paths) in the UI.
+
+## 0.5 — Cross-file symbol resolution (done 2026-10-09)
+
+Derived symbols follow the package's import graph from its entry file, so internal fixes
+report as public names (moment `locale`, marked `parse`, qs `parse`). Entry chosen
+source-first; barrels, `module.exports = require()`, classes and module-level variables are
+followed. Validated live on moment, marked, qs, lodash, express, send, minimist.
 - Fastify and Koa entry points; `express.static` and regex paths.
 - Container image inventory through a Syft/Grype adapter (external binary, optional).
 - A review page in the dashboard for derived entries (today it is the CLI).
 
-## 0.5 — Team edition (separate commercial repo)
+## 0.6 — Team edition (separate commercial repo)
 
 - OIDC single sign-on, local accounts fallback.
 - Roles: admin, analyst, viewer (executives are viewers).
@@ -56,7 +60,7 @@ Still open from this phase:
 - Offline advisory bundles for air-gapped installs.
 - The open repo keeps WCAG AA on every page and a stable API the team edition builds on.
 
-## 0.6 — Python and Go
+## 0.7 — Python and Go
 
 - Python: tree-sitter (wasm) parser, Flask / FastAPI / Django entry points, same tiers.
 - Go: wrap `govulncheck` (symbol-level, from the Go vuln DB) and map into tiers.

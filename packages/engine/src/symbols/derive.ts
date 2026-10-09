@@ -3,7 +3,8 @@ import { DAY } from '../vulns/cache.ts';
 import { parseUnifiedDiff, sourceFiles } from './diff.ts';
 import { fixCandidates, diffUrl, rawRef, type FixCandidate } from './fixcommits.ts';
 import { fetchDiff, fetchRaw, RateLimited, type GitHubOptions } from './github.ts';
-import { analyzeFile, enclosingAll, resolvePublic } from './functions.ts';
+import { analyzeFile, enclosingAll, enclosingTopLevel, resolvePublic } from './functions.ts';
+import { PackageGraph, entryCandidates, findPackage, resolveAcrossFiles } from './package.ts';
 import type { DerivedStore } from './store.ts';
 
 export interface DeriveOptions extends GitHubOptions {
@@ -21,10 +22,12 @@ export interface DeriveOutcome {
 }
 
 const MAX_FILES = 12;
+const MAX_ENTRY_TRIES = 4;
 
 /**
  * Derives the vulnerable symbols for one advisory on one package from its fix commit(s):
- * diff → touched lines → enclosing functions → public symbols of that file.
+ * diff → touched lines → enclosing functions → public surface of that file → carried up the
+ * package's import graph to the entry file's public names.
  */
 export async function deriveSymbols(advisory: Advisory, pkg: string, opts: DeriveOptions): Promise<DeriveOutcome> {
   const ids = [advisory.id, ...advisory.aliases];
@@ -46,6 +49,7 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
   let internalOnly = false;
   let defaultCallable = false;
   let moduleLevel = false;
+  let entryPath: string | undefined;
 
   try {
     for (const c of candidates) {
@@ -55,29 +59,34 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
       if (!touched.length) continue;
       used.push(c.url);
       repoMatch ||= c.repoMatch;
+
+      /** per touched file: tainted local names for the cross-file pass */
+      const startLocals = new Map<string, Set<string>>();
       for (const f of touched) {
         const text = await fetchRaw(c.owner, c.repo, rawRef(c), f.path, opts);
         if (!text) continue;
         const facts = analyzeFile(text, f.path);
         defaultCallable ||= facts.defaultIsFunction;
+        const locals = new Set<string>();
         let hit = false;
         for (const h of f.hunks) {
           for (const ln of h.touchedNewLines) {
             const chain = enclosingAll(facts, ln);
             if (!chain.length) {
-              // Module-level change (a regex table, a constant). When the package is one callable,
-              // that callable is what reaches it.
-              if (facts.defaultIsFunction) {
-                hit = true;
-                moduleLevel = true;
-              }
+              // Module-level change (a regex table, a constant): taint the declaration it sits in.
+              const top = enclosingTopLevel(facts, ln);
+              if (top) locals.add(top.name);
+              hit = true;
+              moduleLevel = true;
               continue;
             }
             hit = true;
-            // Record the innermost named function; resolve outward until something public is reached
-            // (a change inside a nested callback belongs to the function that owns the callback).
             const named = chain.find((fn) => !fn.name.startsWith('<anon'));
-            if (named) changed.add(named.name);
+            if (named) {
+              changed.add(named.name);
+              locals.add(named.name);
+              if (named.className) locals.add(named.className);
+            }
             let resolved = false;
             for (const fn of chain) {
               const pubs = resolvePublic(facts, fn);
@@ -89,7 +98,39 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
             if (!resolved) internalOnly = true;
           }
         }
-        if (hit) files.add(f.path);
+        if (hit) {
+          files.add(f.path);
+          if (!locals.size) for (const local of facts.publicByName.values()) locals.add(local);
+          startLocals.set(f.path, locals);
+        }
+      }
+
+      // Cross-file: carry the tainted names up to the package entry's public surface.
+      if (startLocals.size) {
+        const fetchText = (p: string) => fetchRaw(c.owner, c.repo, rawRef(c), p, opts);
+        const first = [...startLocals.keys()][0]!;
+        const found = await findPackage({ fetchText }, first, pkg);
+        if (found) {
+          const graph = new PackageGraph(fetchText, 200);
+          const prefix = found.dir ? `${found.dir}/` : '';
+          let tries = 0;
+          for (const cand of entryCandidates(found.pkg, pkg)) {
+            const entry = prefix + cand;
+            if (!(await graph.exists(entry))) continue;
+            if (++tries > MAX_ENTRY_TRIES) break;
+            let any = false;
+            for (const [path, locals] of startLocals) {
+              const r = await resolveAcrossFiles(graph, entry, path, locals);
+              if (!r) continue;
+              any = true;
+              for (const [s, via] of r.symbols) if (!symbols.has(s) || symbols.get(s)!.startsWith('caller:')) symbols.set(s, `entry:${via}`);
+            }
+            if (any) {
+              entryPath = entry;
+              break;
+            }
+          }
+        }
       }
       if (symbols.size) break; // the best-ranked commit that yields symbols wins
     }
@@ -100,7 +141,7 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
 
   if (!used.length) return fail(opts, advisory, pkg, 'fix links found but no diff could be fetched or it touched only tests/docs');
   if (!symbols.size && (changed.size || moduleLevel) && defaultCallable) symbols.set('default', moduleLevel && !changed.size ? 'module-level-change' : 'package-is-one-function');
-  if (!symbols.size) return fail(opts, advisory, pkg, changed.size ? `fix changed internal function(s) ${[...changed].join(', ')} with no public caller in the same file` : 'fix touched no function bodies (module-level change in a multi-export file)');
+  if (!symbols.size) return fail(opts, advisory, pkg, changed.size ? `fix changed internal function(s) ${[...changed].join(', ')} that no entry-file export reaches` : 'fix touched no function bodies and could not be traced to an entry export');
 
   const entry: SymbolEntry = {
     ids,
@@ -110,13 +151,14 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
     source: 'derived',
     confidence: 'derived',
     references: used,
-    note: internalOnly ? 'Some changed functions had no public caller in their file; coverage may be partial.' : undefined,
+    note: internalOnly && !entryPath ? 'Some changed functions had no public caller in their file; coverage may be partial.' : undefined,
     evidence: {
       commits: used,
       files: [...files],
       changedFunctions: changed.size ? [...changed] : moduleLevel ? ['<module scope>'] : [],
       resolvedVia: Object.fromEntries(symbols),
       repoMatch,
+      entry: entryPath,
       derivedAt: new Date().toISOString(),
     },
   };
