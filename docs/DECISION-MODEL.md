@@ -13,7 +13,7 @@ does not belong in this file.
 | Vulnerable symbols for (advisory, package) | `data/vulnerable-symbols.json` | tiers 2–4 |
 | Imports, functions, calls | TypeScript parser over the project | call graph |
 | Entry points (method, path, guards) | Express route registrations, mounts, `app.use(guard)` | reachability, authentication |
-| Request-data hint | arguments mention `req.*`, or a local assigned from `req.*`; propagated along the path | "user input" |
+| Request data | each argument's roots (parameters, `req.*`, captured names, through locals and destructuring); tainted names carried parameter-by-parameter along the path | "user input" |
 | Network exposure | Dockerfile `EXPOSE`, compose `ports:`, `app.listen` host | exposure |
 | EPSS score, KEV membership | FIRST, CISA | exploitation |
 
@@ -124,9 +124,13 @@ The score never changes a decision; it orders findings within a decision.
 - Call graph: intra-file by name, cross-file by export name or by any function of that name
   in the target module, `this.method()`, and containment (a function reaches the callbacks and
   closures defined inside it). No dynamic dispatch, no class hierarchies, no prototype chains.
-- Taint: any `req.*` in a call's arguments, or in a local assigned from one, propagated along
-  the found path. It is a hint: on Juice Shop it flags the challenge-notification chain because
-  `req` enters the handler, not because request data reaches the sanitizer.
+- Request data: tracked by name. Inside a function, each argument is reduced to the names it
+  derives from (parameters, `req`/`request`, captured identifiers), resolving local variables,
+  destructuring and call results. Along a path, a callee's parameter is tainted when the
+  argument at its position is; a callback or returned closure inherits the tainted names it
+  captures. The vulnerable call is "reached by request data" only when one of its own
+  arguments traces back. Not tracked: object fields written then read elsewhere, data passed
+  through `this`, databases, globals, and sanitisers (a cleaned value still counts as tainted).
 - Bundlers and tree-shaking are ignored: "present" means "in the lockfile".
 - Cross-file resolution over-approximates on purpose: every public function that can reach the
   changed code counts (moment's `months()` reads locale config, so it is listed with

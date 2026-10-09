@@ -30,12 +30,21 @@ export type CallTarget =
   | { kind: 'local'; name: string; file?: string }
   | { kind: 'unknown'; text: string };
 
+export interface CallArg {
+  /** Argument expression, abbreviated. */
+  text: string;
+  /** Names the argument derives from: the function's parameters, `req`/`request`, or free (captured) identifiers. */
+  roots: string[];
+}
+
 export interface CallSite {
   line: number;
   col: number;
   text: string;
   target: CallTarget;
+  /** Some argument derives directly from `req.*` in this function. */
   userInput: boolean;
+  args: CallArg[];
 }
 
 export interface FunctionInfo {
@@ -294,53 +303,91 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     return false;
   }
 
-  // Identifiers inside a function assigned from req.* (one level of taint).
-  const taintedByFn = new Map<ts.Node | undefined, Set<string>>();
-  function mentionsReq(n: ts.Node): boolean {
-    let hit = false;
-    const walk = (x: ts.Node) => {
-      if (hit) return;
-      if (ts.isPropertyAccessExpression(x) || ts.isElementAccessExpression(x)) {
-        let root: ts.Node = x;
-        while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
-        if (ts.isIdentifier(root) && REQ_NAMES.has(root.text)) {
-          hit = true;
-          return;
-        }
-      }
-      ts.forEachChild(x, walk);
-    };
-    walk(n);
-    return hit;
+  // ---- data flow inside a function: which names does each expression derive from? ----
+  // Roots are the function's parameters, `req`/`request`, and free (captured) identifiers.
+  // Local variables are resolved to the roots of what they were assigned from.
+  const flowByFn = new Map<ts.Node | undefined, { locals: Map<string, Set<string>>; params: Set<string> }>();
+
+  function baseIdentifiers(n: ts.Node, out: Set<string>) {
+    if (ts.isIdentifier(n)) {
+      out.add(n.text);
+      return;
+    }
+    if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
+      baseIdentifiers(n.expression, out);
+      if (ts.isElementAccessExpression(n)) baseIdentifiers(n.argumentExpression, out);
+      return;
+    }
+    if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
+      // The result of a call derives from its arguments (and its receiver for method calls).
+      for (const a of n.arguments ?? []) baseIdentifiers(a, out);
+      if (ts.isPropertyAccessExpression(n.expression)) baseIdentifiers(n.expression.expression, out);
+      return;
+    }
+    if (isFunctionLike(n)) return; // a function value is not data
+    ts.forEachChild(n, (c) => baseIdentifiers(c, out));
   }
-  function tainted(fnNode: ts.Node | undefined): Set<string> {
-    let set = taintedByFn.get(fnNode);
-    if (set) return set;
-    set = new Set();
+  function flow(fnNode: ts.Node | undefined) {
+    let f = flowByFn.get(fnNode);
+    if (f) return f;
     const scope = fnNode ?? sf;
+    const params = new Set<string>();
+    if (fnNode && isFunctionLike(fnNode)) for (const p of fnNode.parameters) if (ts.isIdentifier(p.name)) params.add(p.name.text);
+    const raw = new Map<string, Set<string>>(); // local -> direct base identifiers of its initializer
+    const bind = (name: ts.BindingName, init: ts.Node | undefined) => {
+      if (!init) return;
+      const ids = new Set<string>();
+      baseIdentifiers(init, ids);
+      if (ts.isIdentifier(name)) raw.set(name.text, new Set([...(raw.get(name.text) ?? []), ...ids]));
+      else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        for (const el of name.elements) if (ts.isBindingElement(el) && ts.isIdentifier(el.name)) raw.set(el.name.text, new Set([...(raw.get(el.name.text) ?? []), ...ids]));
+      }
+    };
     const walk = (x: ts.Node) => {
       if (x !== scope && isFunctionLike(x)) return;
-      if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.initializer && mentionsReq(x.initializer)) set!.add(x.name.text);
+      if (ts.isVariableDeclaration(x)) bind(x.name, x.initializer);
+      else if (ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(x.left)) bind(x.left, x.right);
       ts.forEachChild(x, walk);
     };
     walk(scope);
-    taintedByFn.set(fnNode, set);
-    return set;
+    // Resolve local chains to roots (params / req / free names), bounded.
+    const locals = new Map<string, Set<string>>();
+    const resolve = (name: string, depth: number, seen: Set<string>): Set<string> => {
+      if (locals.has(name)) return locals.get(name)!;
+      const direct = raw.get(name);
+      if (!direct) return new Set([name]); // param or free identifier: a root
+      if (depth > 6 || seen.has(name)) return new Set();
+      seen.add(name);
+      const out = new Set<string>();
+      for (const d of direct) {
+        if (d === name) continue;
+        for (const r of resolve(d, depth + 1, seen)) out.add(r);
+      }
+      locals.set(name, out);
+      return out;
+    };
+    for (const name of raw.keys()) resolve(name, 0, new Set());
+    f = { locals, params };
+    flowByFn.set(fnNode, f);
+    return f;
   }
-  function argsUseInput(call: ts.CallExpression, fnNode: ts.Node | undefined): boolean {
-    const t = tainted(fnNode);
-    for (const a of call.arguments) {
-      if (mentionsReq(a)) return true;
-      let found = false;
-      const walk = (x: ts.Node) => {
-        if (found) return;
-        if (ts.isIdentifier(x) && t.has(x.text)) found = true;
-        else ts.forEachChild(x, walk);
-      };
-      walk(a);
-      if (found) return true;
+  function rootsOf(expr: ts.Node, fnNode: ts.Node | undefined): Set<string> {
+    const f = flow(fnNode);
+    const ids = new Set<string>();
+    baseIdentifiers(expr, ids);
+    const out = new Set<string>();
+    for (const id of ids) {
+      const r = f.locals.get(id);
+      if (r) for (const x of r) out.add(x);
+      else out.add(id);
     }
-    return false;
+    return out;
+  }
+  function callArgs(call: ts.CallExpression, fnNode: ts.Node | undefined): CallArg[] {
+    return call.arguments.map((a) => ({ text: a.getText(sf).replace(/\s+/g, ' ').slice(0, 60), roots: [...rootsOf(a, fnNode)] }));
+  }
+  function argsUseInput(args: CallArg[]): boolean {
+    return args.some((a) => a.roots.some((r) => REQ_NAMES.has(r)));
   }
 
   // ---- pass 3: calls, routes, exports ----
@@ -552,7 +599,8 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
           else target = { kind: 'unknown', text: `${recv}.${m}` };
         }
         if (target) {
-          fn.calls.push({ line, col, text: callee.getText(sf).replace(/\s+/g, ' ').slice(0, 80), target, userInput: argsUseInput(n, fnNode) });
+          const args = callArgs(n, fnNode);
+          fn.calls.push({ line, col, text: callee.getText(sf).replace(/\s+/g, ' ').slice(0, 80), target, userInput: argsUseInput(args), args });
         }
       }
     }

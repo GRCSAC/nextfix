@@ -14,6 +14,8 @@ export interface ProjectGraph {
   edges: Map<string, Set<string>>;
   /** function id -> callee ids where request data was passed as an argument */
   edgeInput: Map<string, Set<string>>;
+  /** function id -> callee id -> the call sites that realise that edge (containment edges have none) */
+  edgeSites: Map<string, Map<string, CallSite[]>>;
   entryPoints: EntryPoint[];
   /** package name -> rel files importing it */
   packagesImported: Map<string, Set<string>>;
@@ -97,10 +99,12 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
 
   const edges = new Map<string, Set<string>>();
   const edgeInput = new Map<string, Set<string>>();
+  const edgeSites = new Map<string, Map<string, CallSite[]>>();
   for (const m of modules.values()) {
     for (const fn of m.functions) {
       const set = new Set<string>();
       const input = new Set<string>();
+      const sites = new Map<string, CallSite[]>();
       for (const c of fn.calls) {
         if (c.target.kind !== 'local') continue;
         let id: string | undefined;
@@ -113,10 +117,12 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
         if (id) {
           set.add(id);
           if (c.userInput) input.add(id);
+          (sites.get(id) ?? sites.set(id, []).get(id)!).push(c);
         }
       }
       if (set.size) edges.set(fn.id, set);
       if (input.size) edgeInput.set(fn.id, input);
+      if (sites.size) edgeSites.set(fn.id, sites);
     }
     // A function reaches the callbacks and closures defined inside it.
     for (const fn of m.functions) {
@@ -209,7 +215,7 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
   const rootApps = [...modules.values()].filter((m) => m.isRootApp).map((m) => m.rel);
   const listenLocalOnly = [...modules.values()].some((m) => m.listens) && [...modules.values()].every((m) => !m.listens || m.listenLocalOnly);
 
-  return { rootDir, modules, functions, edges, edgeInput, entryPoints, packagesImported, rootApps, listenLocalOnly };
+  return { rootDir, modules, functions, edges, edgeInput, edgeSites, entryPoints, packagesImported, rootApps, listenLocalOnly };
 }
 
 function joinPath(a: string, b: string): string {

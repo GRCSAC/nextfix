@@ -57,7 +57,7 @@ export function advisoryName(f: Finding): string {
 }
 
 export function bestPath(f: Finding) {
-  return f.reach.paths.find((x) => !x.entry.authenticated) ?? f.reach.paths[0];
+  return f.reach.paths.find((x) => !x.entry.authenticated && x.userInput) ?? f.reach.paths.find((x) => !x.entry.authenticated) ?? f.reach.paths.find((x) => x.userInput) ?? f.reach.paths[0];
 }
 
 export function entryLabel(f: Finding): string | undefined {
@@ -135,11 +135,13 @@ export function ticketMarkdown(f: Finding, targetName: string): string {
     ...f.why.map((w) => `- ${w}`),
     '',
   ];
-  const p = f.reach.paths[0];
+  const p = bestPath(f);
   if (p) {
     lines.push('## Path', '```', `${p.entry.method} ${p.entry.path}${p.entry.authenticated ? ' [auth: ' + p.entry.guards.join(', ') + ']' : ' [no auth]'}`);
     for (const h of p.hops) lines.push(`  → ${h.name}  (${h.file}:${h.line})`);
-    lines.push(`  → ${p.callSite.text}()  (${p.callSite.file}:${p.callSite.line})`, '```', '');
+    lines.push(`  → ${p.callSite.text}()  (${p.callSite.file}:${p.callSite.line})`, '```');
+    if (p.userInput && p.taintedArgument) lines.push(`Request data \`${p.inputSource ?? ''}\` arrives as argument ${p.taintedArgument.index + 1} (\`${p.taintedArgument.text}\`).`);
+    lines.push('');
   }
   lines.push('## Fix');
   const cmd = fixCommand(f);

@@ -4,7 +4,7 @@ import { api } from '../api.ts';
 import { DecisionBadge } from '../components/DecisionBadge.tsx';
 import { PathDiagram } from '../components/PathDiagram.tsx';
 import { I } from '../components/Icons.tsx';
-import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, entryLabel, fixCommand, severity, ticketMarkdown } from '../format.ts';
+import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, bestPath, entryLabel, fixCommand, severity, ticketMarkdown } from '../format.ts';
 
 interface Props {
   report: ScanReport;
@@ -101,7 +101,7 @@ function Detail({ f, scanId, targetName, onClose }: { f: Finding; scanId: number
     }
   };
   const cmd = fixCommand(f);
-  const path = f.reach.paths.find((p) => !p.entry.authenticated) ?? f.reach.paths[0];
+  const path = bestPath(f);
   const sev = severity(f);
 
   return (
@@ -127,7 +127,7 @@ function Detail({ f, scanId, targetName, onClose }: { f: Finding; scanId: number
         ) : (
           <p className="empty">{f.reach.importedIn.length ? `Imported in ${f.reach.importedIn.join(', ')}.` : 'Not imported by any source file.'}</p>
         )}
-        {f.reach.paths.length > 1 && <p className="empty">{f.reach.paths.length} entry points reach this call; the unauthenticated one is shown.</p>}
+        {f.reach.paths.length > 1 && <p className="empty">{f.reach.paths.length} entry points reach this call, {f.reach.paths.filter((p) => p.userInput).length} carrying request data; the worst case is shown.</p>}
       </section>
 
       {f.symbols && (

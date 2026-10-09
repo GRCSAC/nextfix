@@ -50,6 +50,8 @@ test('reachability tiers on the demo app', () => {
   assert.equal(template.paths[0]?.entry.authenticated, false);
   assert.equal(template.paths[0]?.userInput, true, 'req.body.template is passed down to _.template');
   assert.equal(template.paths[0]?.inputEntersAt?.file, 'src/app.js');
+  assert.equal(template.paths[0]?.inputSource, 'req.body.template');
+  assert.deepEqual(template.paths[0]?.taintedArgument, { index: 0, text: 'source' });
 
   const trim = assessReach(g, lodash, db.lookup(['CVE-2020-28500'], 'lodash'));
   assert.equal(trim.tier, 'reachable');

@@ -38,11 +38,19 @@ test('reachability follows controller and class-method handlers', () => {
   // factory (returned closure), and the nested-callback handler.
   assert.deepEqual(entries, ['GET /factory', 'GET /nested', 'GET /reports', 'POST /reports/preview', 'USE /legacy']);
   const factory = template.paths.find((p) => p.entry.path === '/factory')!;
-  assert.equal(factory.callSite.userInput, true);
+  assert.equal(factory.userInput, true);
+  assert.equal(factory.inputSource, 'req.query.t');
+  // /reports/preview passes req.body.rows into render(), but template() gets a literal: the
+  // request data reaches the compiled template's call, not the vulnerable template() itself.
   const preview = template.paths.find((p) => p.entry.path === '/reports/preview')!;
-  assert.equal(preview.entry.authenticated, false);
-  assert.equal(preview.userInput, true);
-
+  assert.equal(preview.userInput, false);
+  // /nested: rows comes from the DAO callback, not from the request.
+  const nested = template.paths.find((p) => p.entry.path === '/nested')!;
+  assert.equal(nested.userInput, false);
+  // USE /legacy: req.query.t goes straight into _.template.
+  const legacy = template.paths.find((p) => p.entry.path === '/legacy')!;
+  assert.equal(legacy.userInput, true);
+  assert.deepEqual(legacy.taintedArgument, { index: 0, text: 'req.query.t' });
   const pick = assessReach(g, lodash, { ids: ['Y'], ecosystem: 'npm', package: 'lodash', symbols: ['pick'], source: 'curated', confidence: 'confirmed' });
   assert.equal(pick.tier, 'reachable');
   assert.equal(pick.paths[0]!.entry.path, '/account');

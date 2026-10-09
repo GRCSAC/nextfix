@@ -18,7 +18,8 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
   const sev = cvss !== undefined ? `CVSS ${cvss.toFixed(1)}${a.severityLabel ? ' ' + a.severityLabel : ''}` : a.severityLabel ?? 'severity unknown';
   why.push(`${c.name} ${c.version} is affected by ${a.cve ?? a.id}: ${a.summary || 'no summary'} (${sev}).`);
 
-  const bestPath = reach.paths.find((p) => !p.entry.authenticated) ?? reach.paths[0];
+  // Worst case first: unauthenticated and carrying request data, then unauthenticated, then any with data.
+  const bestPath = reach.paths.find((p) => !p.entry.authenticated && p.userInput) ?? reach.paths.find((p) => !p.entry.authenticated) ?? reach.paths.find((p) => p.userInput) ?? reach.paths[0];
   const unauth = !!bestPath && !bestPath.entry.authenticated;
   const userInput = !!bestPath?.userInput;
 
@@ -50,14 +51,26 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
       if (unauth) decision = exploitation !== 'none' || (cvss ?? 0) >= 9 || (userInput && (cvss ?? 0) >= 7) ? 'Act' : 'Attend';
       else decision = exploitation === 'active' ? 'Act' : 'Attend';
       why.push(`Reachable: ${describePath(bestPath!)}.`);
-      if (bestPath!.callSite.userInput) why.push('User-controlled request data flows directly into that call.');
-      else if (bestPath!.inputEntersAt) {
-        const e = bestPath!.inputEntersAt;
-        why.push(`User-controlled request data enters the chain in ${e.name} (${e.file}:${e.line}) and is passed down to the vulnerable call.`);
-      } else why.push('No request data was seen flowing into the call (static heuristic; treat as a hint, not proof).');
+      if (bestPath!.userInput && bestPath!.taintedArgument) {
+        const t = bestPath!.taintedArgument;
+        const src = bestPath!.inputSource ? `\`${bestPath!.inputSource}\`` : 'request data';
+        if (bestPath!.callSite.userInput) why.push(`Request data ${src} is passed directly as argument ${t.index + 1} of ${bestPath!.callSite.text}().`);
+        else if (bestPath!.inputEntersAt) {
+          const e = bestPath!.inputEntersAt;
+          why.push(`Request data ${src} enters the chain in ${e.name} (${e.file}:${e.line}) and arrives as argument ${t.index + 1} (\`${t.text}\`) of ${bestPath!.callSite.text}().`);
+        } else why.push(`Request data ${src} arrives as argument ${t.index + 1} of ${bestPath!.callSite.text}().`);
+      } else {
+        const other = reach.paths.find((p) => p.userInput && p.taintedArgument);
+        if (other) {
+          why.push(`On this path the arguments are the application's own. Request data does reach it through ${other.entry.method} ${other.entry.path}${other.entry.authenticated ? ' (behind auth)' : ''}: \`${other.inputSource ?? 'request data'}\` arrives as argument ${other.taintedArgument!.index + 1} of ${other.callSite.text}().`);
+        } else why.push("No request data was traced into the arguments of the vulnerable call on any path; the inputs appear to be the application's own.");
+      }
       if (!bestPath!.entry.authenticated) why.push(`The entry point ${bestPath!.entry.method} ${bestPath!.entry.path} has no auth guard.`);
       else why.push(`The entry point ${bestPath!.entry.method} ${bestPath!.entry.path} sits behind ${list(bestPath!.entry.guards)}.`);
-      if (reach.paths.length > 1) why.push(`${reach.paths.length} entry points reach this call in total.`);
+      if (reach.paths.length > 1) {
+        const n = reach.paths.filter((p) => p.userInput).length;
+        why.push(`${reach.paths.length} entry points reach this call in total, ${n} of them carrying request data.`);
+      }
       break;
     }
   }

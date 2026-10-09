@@ -48,7 +48,9 @@ export function readNpmLock(projectDir: string): NpmInventory {
     ...Object.keys(root.devDependencies ?? {}),
   ]);
 
-  const components: Component[] = [];
+  // One component per name@version: the same package installed at several lockfile paths is
+  // one thing to fix. It is "dev" only if every copy is dev, "direct" if any copy is.
+  const byPurl = new Map<string, Component>();
   for (const [key, pkg] of Object.entries(lock.packages)) {
     if (key === '' || !pkg.version) continue;
     const marker = 'node_modules/';
@@ -56,17 +58,27 @@ export function readNpmLock(projectDir: string): NpmInventory {
     if (idx < 0) continue; // workspace link, not a dependency
     const name = key.slice(idx + marker.length);
     const nested = key.slice(0, idx).includes(marker);
-    components.push({
+    const purl = purlFor(name, pkg.version);
+    const existing = byPurl.get(purl);
+    if (existing) {
+      existing.dev = existing.dev && !!pkg.dev;
+      existing.optional = existing.optional && !!pkg.optional;
+      existing.direct = existing.direct || (!nested && directNames.has(name));
+      existing.paths = [...(existing.paths ?? [existing.path]), key];
+      continue;
+    }
+    byPurl.set(purl, {
       ecosystem: 'npm',
       name,
       version: pkg.version,
-      purl: purlFor(name, pkg.version),
+      purl,
       dev: !!pkg.dev,
       optional: !!pkg.optional,
       direct: !nested && directNames.has(name),
       path: key,
     });
   }
+  const components = [...byPurl.values()];
   components.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   return {
     components,

@@ -38,9 +38,8 @@ advisories reproduced, 12 of 14 uncurated advisories gained function data.
 0.4.1 validated the analyzer on Juice Shop, NodeGoat and Hackathon Starter and fixed what
 that found (see CHANGELOG). Coverage per routes file is now 87–96% of the registrations.
 
-Still open from this phase:
-- Real taint: track which argument carries request data instead of "req appears in the chain".
-- Group duplicate components (same name@version at several lockfile paths) in the UI.
+Both follow-ups landed in 0.5.1: argument-level request-data tracing, and duplicate lockfile
+entries merged into one component.
 
 ## 0.5 — Cross-file symbol resolution (done 2026-10-09)
 

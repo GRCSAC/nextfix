@@ -181,7 +181,8 @@ derivation on (NextFix 0.4.1). "Routes" is what `grep` finds in the main routes 
 What the first pass got wrong, and what changed because of it, is in the 0.4.1 entry of
 [CHANGELOG.md](CHANGELOG.md). What is still open: handlers NextFix cannot follow are listed
 per entry point as `unresolvedHandlers` (11 of 107 on Juice Shop, mostly third-party
-middleware factories), and the request-data hint is coarse (any `req.*` in the chain counts).
+middleware factories), and request-data tracing follows names, not object fields or
+databases, so data stored and read back later is not followed.
 
 Juice Shop needed one line of `nextfix.config.json` to ignore `data/static/codefixes`, a
 folder of challenge snippets that re-declare the server's routes without their imports.
@@ -193,7 +194,7 @@ folder of challenge snippets that re-declare the server's routes without their i
 | npm lockfile inventory (v2/v3) | ✅ |
 | OSV + EPSS + KEV with local cache and offline mode | ✅ |
 | JavaScript/TypeScript call graph, Express entry points, auth guards, mounts | ✅ spike |
-| Request-data taint hint (one level + chain propagation) | ✅ heuristic |
+| Request-data tracing, argument by argument along the path | ✅ |
 | Reachability tiers + SSVC-style decision + score | ✅ |
 | Docker / compose exposure | ✅ |
 | OpenVEX + JSON report | ✅ |

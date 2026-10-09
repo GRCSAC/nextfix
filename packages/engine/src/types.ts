@@ -12,6 +12,8 @@ export interface Component {
   direct: boolean;
   /** Lockfile path, e.g. node_modules/a/node_modules/b */
   path: string;
+  /** All lockfile paths when the same name@version is installed more than once. */
+  paths?: string[];
 }
 
 export interface Advisory {
@@ -111,10 +113,14 @@ export interface ReachPath {
   entry: EntryPoint;
   hops: PathHop[];
   callSite: CallSiteRef;
-  /** Request data reaches the vulnerable call, either directly or passed down the chain. */
+  /** Request data reaches an argument of the vulnerable call, traced parameter by parameter. */
   userInput: boolean;
   /** Where request data first enters the chain, when it is not at the call site itself. */
   inputEntersAt?: { file: string; line: number; name: string };
+  /** The request expression that starts the flow, e.g. `req.body.template`. */
+  inputSource?: string;
+  /** Which argument of the vulnerable call carries it (0-based) and its text. */
+  taintedArgument?: { index: number; text: string };
 }
 
 export interface ReachResult {

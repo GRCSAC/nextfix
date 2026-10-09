@@ -5,6 +5,21 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-09
+
+### Changed
+- **Argument-level request-data tracing.** "Request data reaches it" used to mean that `req`
+  appeared somewhere in the call chain. Each call site now records which parameters, `req`
+  accesses or captured names every argument derives from (through local variables,
+  destructuring and call results), the path search carries the set of tainted names from the
+  handler's `req` parameter by parameter through every call and into callbacks, and a
+  vulnerable call counts as reached by request data only when one of its arguments traces
+  back to it. Findings name the source expression (`req.body.template`) and the argument it
+  arrives in. A path that carries request data is preferred over one that does not, both for
+  the decision and in the dashboard.
+- The same package at several lockfile paths is one component (dev only if every copy is dev,
+  direct if any copy is), so it is one finding to fix rather than several.
+
 ## [0.5.0] — 2026-10-09
 
 ### Added
