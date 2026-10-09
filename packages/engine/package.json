@@ -1,0 +1,21 @@
+{
+  "name": "@nextfix/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NextFix analysis engine: inventory, advisories, call-graph reachability, exposure, decisions.",
+  "bin": {
+    "nextfix": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "semver": "^7.7.2",
+    "typescript": "^5.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/semver": "^7.7.0"
+  }
+}

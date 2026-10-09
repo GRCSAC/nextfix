@@ -1,0 +1,18 @@
+{
+  "name": "express-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NextFix demo target: a small Express shop that exercises every reachability tier.",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js"
+  },
+  "dependencies": {
+    "express": "4.17.1",
+    "lodash": "4.17.15",
+    "moment": "2.29.1"
+  },
+  "devDependencies": {
+    "minimist": "1.2.5"
+  }
+}

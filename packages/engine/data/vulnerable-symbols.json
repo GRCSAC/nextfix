@@ -1,0 +1,72 @@
+{
+  "$schema": "nextfix/vulnerable-symbols/v1",
+  "description": "Function-level data for advisories: which exported symbols of a package carry the vulnerability. Source 'curated' = taken from the advisory text and fix commit by a human; 'derived' = extracted automatically from the fix diff; 'advisory' = published by the advisory database itself (e.g. Go vulndb). Confidence is what NextFix shows the user.",
+  "entries": [
+    {
+      "ids": ["GHSA-35jh-r3h4-6jhm", "CVE-2021-23337"],
+      "ecosystem": "npm",
+      "package": "lodash",
+      "symbols": ["template"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "references": ["https://github.com/advisories/GHSA-35jh-r3h4-6jhm"]
+    },
+    {
+      "ids": ["GHSA-29mw-wpgm-hmr9", "CVE-2020-28500"],
+      "ecosystem": "npm",
+      "package": "lodash",
+      "symbols": ["toNumber", "trim", "trimEnd"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "references": ["https://github.com/advisories/GHSA-29mw-wpgm-hmr9"]
+    },
+    {
+      "ids": ["GHSA-p6mc-m468-83gw", "CVE-2020-8203"],
+      "ecosystem": "npm",
+      "package": "lodash",
+      "symbols": ["pick", "set", "setWith", "update", "updateWith", "zipObjectDeep"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "references": ["https://github.com/advisories/GHSA-p6mc-m468-83gw"]
+    },
+    {
+      "ids": ["GHSA-jf85-cpcp-j695", "CVE-2019-10744"],
+      "ecosystem": "npm",
+      "package": "lodash",
+      "symbols": ["defaultsDeep"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "references": ["https://github.com/advisories/GHSA-jf85-cpcp-j695"]
+    },
+    {
+      "ids": ["GHSA-rv95-896h-c2vc", "CVE-2024-29041"],
+      "ecosystem": "npm",
+      "package": "express",
+      "receiver": "Response",
+      "symbols": ["redirect", "location"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "references": ["https://github.com/advisories/GHSA-rv95-896h-c2vc"]
+    },
+    {
+      "ids": ["GHSA-qw6h-vgh9-j6wx", "CVE-2024-43796"],
+      "ecosystem": "npm",
+      "package": "express",
+      "receiver": "Response",
+      "symbols": ["redirect"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "references": ["https://github.com/advisories/GHSA-qw6h-vgh9-j6wx"]
+    },
+    {
+      "ids": ["GHSA-xvch-5gv4-984h", "CVE-2021-44906"],
+      "ecosystem": "npm",
+      "package": "minimist",
+      "symbols": ["default"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "note": "The vulnerable setKey() is internal; the package's single default export is the only entry, so any call is a call into vulnerable code.",
+      "references": ["https://github.com/advisories/GHSA-xvch-5gv4-984h"]
+    }
+  ]
+}
