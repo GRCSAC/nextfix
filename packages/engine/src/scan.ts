@@ -84,6 +84,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       },
       exposure,
       entryPoints: graph.entryPoints,
+      components: inv.components,
       findings,
     };
   } finally {

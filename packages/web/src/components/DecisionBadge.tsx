@@ -5,7 +5,7 @@ export function DecisionBadge({ decision, short = false }: { decision: Decision;
   const m = DECISION_META[decision];
   return (
     <span className={`badge ${m.cls}`} title={m.help}>
-      <span className="dot" aria-hidden="true">{m.icon}</span>
+      <span className="dot-i" aria-hidden="true">{m.icon}</span>
       {short ? m.short : m.label}
     </span>
   );

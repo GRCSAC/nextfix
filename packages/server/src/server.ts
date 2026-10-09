@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { scan } from '../../engine/src/scan.ts';
 import { toOpenVex } from '../../engine/src/report/vex.ts';
 import { toolVersion } from '../../engine/src/version.ts';
+import { defaultCachePath } from '../../engine/src/vulns/cache.ts';
 import { Store } from './store.ts';
 import { diffReports } from './diff.ts';
 
@@ -82,7 +83,7 @@ export function createNextFixServer(opts: ServerOptions) {
     const parts = path.split('/').filter(Boolean); // ['api', ...]
     const [, a, b, c] = parts;
 
-    if (m === 'GET' && a === 'health') return send(res, 200, { ok: true, version: toolVersion(), scanning });
+    if (m === 'GET' && a === 'health') return send(res, 200, { ok: true, version: toolVersion(), scanning, dbPath: opts.store.path, cachePath: defaultCachePath() });
 
     if (a === 'targets' && !b) {
       if (m === 'GET') return send(res, 200, opts.store.listTargets());

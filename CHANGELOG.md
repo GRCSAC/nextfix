@@ -5,6 +5,29 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-09
+
+### Added
+- Brand: Midnight/Navy surfaces, Electric Blue actions, the gradient N mark and two-tone
+  wordmark, tagline "Find › Prioritize › Fix › Prove". Brand kit in `docs/BRAND.md` and
+  `docs/brand/` for the website team.
+- Dashboard redesign to the approved prototype: left rail (Apps, Settings, Help), top tabs
+  (Overview, Findings, Components, Evidence, Reports), application header with status and
+  summary; Overview with scan-overview dot matrix, the remediation command center ring,
+  entry points without authentication, trend with range picker, where-the-findings-landed
+  bar with percentages, component-states ring, what-to-fix-first table, evidence &
+  exceptions card, and a "How it works" explainer.
+- New pages: Components (every installed package with its state), Evidence (all
+  set-asides grouped by reason with the VEX justification), Reports (exports and scan
+  history), Apps (add, switch, remove applications), Settings (theme, data locations).
+- Reports now include the full component list.
+- Apache 2.0 `LICENSE` and `NOTICE`; open-core split documented in the README.
+
+### Changed
+- Decision colours: Fix now red, Fix next cycle amber, Set aside blue, Watch cyan, drawn in
+  an order validated for colour-vision deficiency.
+- Dark theme is the default; Light and Match OS are in Settings.
+
 ## [0.2.0] — 2026-10-09
 
 ### Added

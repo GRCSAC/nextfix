@@ -146,5 +146,7 @@ export interface ScanReport {
   summary: ScanSummary;
   exposure: Exposure;
   entryPoints: EntryPoint[];
+  /** Every installed component (absent in reports written before 0.3). */
+  components?: Component[];
   findings: Finding[];
 }

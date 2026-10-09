@@ -11,11 +11,11 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.2.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.3.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## Two dashboards, one scan
+## The dashboards
 
 ```bash
 npm install
@@ -24,14 +24,18 @@ npm run serve        # builds the UI and opens http://127.0.0.1:8790
 
 Enter a project folder on the welcome screen. NextFix scans it and keeps the history.
 
-- **Executive:** fix-now and fix-next-cycle counts with change since the last scan, the
-  share of findings set aside with evidence, unauthenticated entry points, the trend across
-  scans, where the findings landed and why, what to fix first, what changed, and exposure.
-- **Remediation:** the queue filtered by decision, reachability and search; each finding
-  opens with the plain-English why, the call path from entry point to vulnerable function
-  (showing where request data enters), the upgrade command, copy-as-ticket, and VEX download.
+- **Overview** (executives): total findings with a dot per decision, the remediation
+  command center ring with Fix now / Fix next cycle / Set aside with evidence / Watch,
+  entry points without authentication, the trend across scans, where the findings landed,
+  component states, what to fix first, and evidence & exceptions.
+- **Findings** (engineers): the queue filtered by decision, reachability and search; each
+  finding opens with the plain-English why, the call path from entry point to vulnerable
+  function (showing where request data enters), the upgrade command, copy-as-ticket, and
+  VEX download.
+- **Components**, **Evidence** (every set-aside with its VEX justification), **Reports**
+  (exports and scan history), **Apps** and **Settings**.
 
-Both views follow the OS light/dark setting and work at phone width.
+Dark by default, light and match-OS in Settings; works at phone width.
 
 ## The command line
 
@@ -137,7 +141,8 @@ every tier. Its `package-lock.json` is committed; do not update its versions.
 | Derived symbols from fix commits (automated, human-reviewed) | ⬜ |
 | Python (Flask / FastAPI / Django) | ⬜ |
 | Go (govulncheck wrapper) | ⬜ |
-| Web UI: executive + remediation dashboards | ✅ |
+| Web UI: Overview, Findings, Components, Evidence, Reports, Apps, Settings | ✅ |
+| Brand applied (see docs/BRAND.md) | ✅ |
 | Server mode: SQLite history, trends, scan diff, JSON API | ✅ |
 | SSO (OIDC), RBAC, audit log, API tokens | ⬜ |
 | Container image inventory (Syft/Grype adapter) | ⬜ |
@@ -155,5 +160,15 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 - Import of a CycloneDX SBOM instead of a lockfile.
 - Deeper taint (sanitizers, multi-level, object fields).
 - Bundler-aware analysis (tree-shaken builds change what is "present").
+
+## License
+
+NextFix is open-core. Everything in this repository, the engine, the CLI, the server and
+both dashboards, is licensed under the [Apache License 2.0](LICENSE). Team features
+(single sign-on, roles, audit log, API tokens) and the curated vulnerable-symbol feed with
+support are offered commercially by GRCSAC LLC and live outside this repository.
+"NextFix" and the logo are trademarks of GRCSAC LLC (see [NOTICE](NOTICE)).
+
+Brand assets and the website hand-off are in [docs/BRAND.md](docs/BRAND.md).
 
 > **Authorized use only.** Point NextFix at code you own or are authorized to assess.

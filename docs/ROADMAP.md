@@ -23,7 +23,13 @@ history per target, scan-over-scan diff.
 Still open from this phase: one-page PDF export, remediation velocity (needs resolved-date
 tracking), KEV/EPSS hot list as its own card.
 
-## 0.3 — Make the evidence wider
+## 0.3 — Brand, redesign, open-core (done 2026-10-09)
+
+Dashboard rebuilt to the approved prototype (rail, tabs, command center ring, entry points,
+component states, evidence & exceptions), brand palette and mark applied, Components /
+Evidence / Reports / Apps / Settings pages, Apache-2.0 license with the open-core split.
+
+## 0.4 — Make the evidence wider
 
 - **Derived symbols:** given an advisory with a fix commit, diff the commit, list the changed
   exported functions, store as `derived` entries, with a human review queue before they
@@ -33,15 +39,15 @@ tracking), KEV/EPSS hot list as its own card.
 - Config file `nextfix.config.json`: auth-guard names, ignored paths, entry-point overrides.
 - Container image inventory through a Syft/Grype adapter (external binary, optional).
 
-## 0.4 — Enterprise accessibility
+## 0.5 — Team edition (separate commercial repo)
 
 - OIDC single sign-on, local accounts fallback.
 - Roles: admin, analyst, viewer (executives are viewers).
 - Audit log, REST API with tokens, Jira and GitHub Issues export.
 - Offline advisory bundles for air-gapped installs.
-- WCAG AA on both dashboards.
+- The open repo keeps WCAG AA on every page and a stable API the team edition builds on.
 
-## 0.5 — Python and Go
+## 0.6 — Python and Go
 
 - Python: tree-sitter (wasm) parser, Flask / FastAPI / Django entry points, same tiers.
 - Go: wrap `govulncheck` (symbol-level, from the Go vuln DB) and map into tiers.
@@ -50,5 +56,7 @@ tracking), KEV/EPSS hot list as its own card.
 
 - Single executable per platform (Node SEA or Bun compile) and a Docker image.
 - Installer for Windows like NetVane; `winget` + Chocolatey.
-- Website `nextfix.grcsac.com`, pricing for SMB: free for one app, paid tiers per app count.
-- Trademark filing for NEXTFIX in classes 9 and 42 (see `docs/NAME-CHECK.md`).
+- Website `nextfix.grcsac.com` (brand kit in `docs/BRAND.md`); open edition free, team
+  edition priced per application count.
+- Trademark filing for NEXTFIX in classes 9 and 42 (see `docs/NAME-CHECK.md`), then flip
+  the repo public.

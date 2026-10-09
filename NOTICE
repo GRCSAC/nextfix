@@ -1,0 +1,9 @@
+NextFix
+Copyright 2026 GRCSAC LLC
+
+"NextFix" and the NextFix logo are trademarks of GRCSAC LLC. The Apache License
+does not grant permission to use them; see LICENSE section 6.
+
+This product retrieves advisory data at runtime from OSV (osv.dev), FIRST EPSS
+(first.org/epss) and the CISA Known Exploited Vulnerabilities catalog, under
+their respective terms.

@@ -26,9 +26,11 @@ export function defaultDbPath(): string {
 /** Scan history. One row per scan, full report kept as JSON so the UI can replay any scan. */
 export class Store {
   private db: DatabaseSync;
+  readonly path: string;
 
   constructor(path = defaultDbPath()) {
     mkdirSync(dirname(path), { recursive: true });
+    this.path = path;
     this.db = new DatabaseSync(path);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
