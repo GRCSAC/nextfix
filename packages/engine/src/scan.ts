@@ -10,11 +10,17 @@ import { assessReach } from './reach/reachability.ts';
 import { analyzeExposure } from './exposure/docker.ts';
 import { decide } from './decide/ssvc.ts';
 import { toolVersion } from './version.ts';
+import { loadConfig } from './config.ts';
+import { DerivedStore } from './symbols/store.ts';
+import { deriveSymbols } from './symbols/derive.ts';
 import type { Decision, Finding, ReachTier, ScanReport } from './types.ts';
 
 export interface ScanOptions {
   offline?: boolean;
   cachePath?: string;
+  /** Derive vulnerable symbols from fix commits for advisories without data (default true). */
+  derive?: boolean;
+  githubToken?: string;
   log?: (msg: string) => void;
 }
 
@@ -25,12 +31,13 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
   const log = opts.log ?? (() => {});
   const cache = new Cache(opts.cachePath);
   try {
+    const config = loadConfig(rootDir);
     log('Inventory: reading package-lock.json');
     const inv = readNpmLock(rootDir);
     log(`Inventory: ${inv.components.length} components`);
 
     log('Code: building call graph and entry points');
-    const graph = analyzeProject(rootDir);
+    const graph = analyzeProject(rootDir, config);
     log(`Code: ${graph.modules.size} modules, ${graph.functions.size} functions, ${graph.entryPoints.length} entry points`);
 
     const exposure = analyzeExposure(rootDir, graph.listenLocalOnly);
@@ -40,7 +47,33 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     const cves = [...advisories.values()].flat().map((a) => a.cve).filter((x): x is string => !!x);
     log(`Advisories: ${[...advisories.values()].flat().length} across ${advisories.size} components; EPSS + KEV for ${cves.length} CVEs`);
     const [epss, kev] = await Promise.all([fetchEpss(cves, cache, opts.offline), fetchKev(cache, opts.offline)]);
-    const symbols = SymbolDb.load();
+
+    const store = new DerivedStore(cache);
+    const symbols = SymbolDb.load(undefined, store.all());
+
+    // Derive function-level data for advisories that have none, from their fix commits.
+    if (opts.derive !== false) {
+      let derived = 0;
+      let skipped = 0;
+      const token = opts.githubToken ?? process.env.GITHUB_TOKEN;
+      for (const c of inv.components) {
+        for (const a of advisories.get(c.purl) ?? []) {
+          if (symbols.lookup([a.id, ...a.aliases], c.name)) continue;
+          const out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences });
+          if (out.entry) {
+            if (!out.cached) derived++;
+            symbols.add(out.entry);
+          } else {
+            skipped++;
+            if (out.reason?.includes('rate limit')) {
+              log(`Symbols: ${out.reason}; stopping derivation for this scan`);
+              break;
+            }
+          }
+        }
+      }
+      log(`Symbols: ${derived} newly derived from fix commits, ${skipped} advisories without usable fix data`);
+    }
 
     const findings: Finding[] = [];
     for (const c of inv.components) {

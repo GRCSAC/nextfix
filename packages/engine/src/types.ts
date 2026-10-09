@@ -28,10 +28,26 @@ export interface Advisory {
   /** Lowest fixed version above the component's version, if any. */
   fixedVersion?: string;
   references: string[];
+  /** References with their advisory-database type (FIX, WEB, …) when known. */
+  typedReferences?: { type?: string; url: string }[];
 }
 
 export type SymbolSource = 'curated' | 'derived' | 'advisory';
 export type SymbolConfidence = 'confirmed' | 'derived';
+
+export interface SymbolEvidence {
+  /** Fix commit / PR / compare URLs the symbols were derived from. */
+  commits: string[];
+  /** Source files touched by the fix (tests and docs excluded). */
+  files: string[];
+  /** Functions whose body the fix changed, as named in the source. */
+  changedFunctions: string[];
+  /** How each public symbol was reached: "direct" (changed function is public) or "caller:<fn>" (public caller of a changed internal). */
+  resolvedVia: Record<string, string>;
+  /** The fix repository name contains the package name. */
+  repoMatch: boolean;
+  derivedAt: string;
+}
 
 export interface SymbolEntry {
   ids: string[];
@@ -44,6 +60,9 @@ export interface SymbolEntry {
   confidence: SymbolConfidence;
   note?: string;
   references?: string[];
+  evidence?: SymbolEvidence;
+  /** A human promoted this derived entry to confirmed. */
+  reviewed?: boolean;
 }
 
 export type ReachTier =

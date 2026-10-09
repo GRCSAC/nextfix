@@ -117,6 +117,7 @@ function toAdvisory(v: OsvVuln, c: Component): Advisory {
     cvssScore: score,
     fixedVersion: lowestFix(v, c),
     references: (v.references ?? []).map((r) => r.url),
+    typedReferences: (v.references ?? []).map((r) => ({ type: r.type, url: r.url })),
   };
 }
 

@@ -32,6 +32,30 @@ does not belong in this file.
 **Confidence** travels with the tier: `confirmed` (curated symbols), `derived` (from the fix
 commit, automated), `package-level` (tiers 1–3).
 
+### How derived symbols are built
+
+1. Candidate fix links from the advisory references: GitHub commit, pull request or compare
+   URLs, ranked `FIX`-typed first, then those whose repository name matches the package,
+   then commits before PRs. At most three are tried; the first that yields symbols wins.
+2. The unified diff is fetched; tests, docs, fixtures, build output and non-source files are
+   dropped; at most 12 files are considered.
+3. Each touched file is fetched at the post-fix ref and parsed. For every added or deleted
+   line, the chain of enclosing functions (innermost first) is walked until one resolves to
+   the file's public surface.
+4. Public surface of a file: `module.exports = …`, `exports.x = …`, `export …`, and any
+   `obj.name = fn` assignment (which is how lodash and Express expose their APIs). A changed
+   function that is public contributes itself and its immediate public callers; a changed
+   internal function contributes public callers up to three hops away, where passing a
+   function as an argument counts as a call.
+5. If nothing resolves but the file's default export is itself a function, the symbol is
+   `default` (the package is one callable).
+6. Failures are remembered for seven days so scans do not retry every time; `nextfix symbols
+   forget` clears one.
+
+Curated entries always outrank derived ones for the same advisory. `nextfix symbols confirm`
+promotes a derived entry after a human looks at the commit; `export` turns confirmed entries
+into curated JSON for the repository.
+
 ## 3. Exploitation
 
 - `active` — CVE is in CISA KEV.
@@ -88,5 +112,7 @@ The score never changes a decision; it orders findings within a decision.
   dispatch, no class hierarchies, no callbacks passed as values, no `this` resolution.
 - Taint: one level inside a function plus propagation along the found path. It is a hint.
 - Bundlers and tree-shaking are ignored: "present" means "in the lockfile".
-- Symbol data covers seven advisories. Everything else is `imported-unknown-symbol`, which
-  is still better than a plain SCA result because `unused` and `dev-only` already prune most.
+- Derived symbols are resolved within the file the fix touched. Packages that assemble their
+  public API elsewhere (many ESM libraries) can yield internal names; those entries are
+  still useful for call matching only when the user code imports that internal path.
+- Advisories without a GitHub fix link in OSV stay `imported-unknown-symbol`.

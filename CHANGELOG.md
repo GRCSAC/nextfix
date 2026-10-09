@@ -5,6 +5,29 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-09
+
+### Added
+- **Derived vulnerable symbols.** For every advisory without function-level data, the scan
+  follows the advisory's GitHub fix commit, pull request or compare link, diffs it, maps the
+  touched lines to the functions that contain them, and resolves those to the file's public
+  surface (exports, `module.exports`, `lodash.x = x` and `res.x = function` assignments,
+  public callers up to three hops, callbacks passed as arguments, changes inside nested
+  callbacks). Results are stored on the machine with the commit as evidence and shown as
+  confidence `derived`. On the demo app this reproduces the hand-curated data for five of
+  six advisories and adds function data for 12 of the 14 that had none.
+- `nextfix symbols derive|list|confirm|forget|export`: inspect derived entries, promote one
+  to `confirmed` after review, and export confirmed entries as curated JSON for the repo.
+- `GITHUB_TOKEN` is honoured for fix-commit fetches; `--no-derive` turns derivation off.
+- `nextfix.config.json`: extra auth-guard patterns, ignored directories, and routes to
+  treat as internal.
+- Chained Express routes: `app.route('/x').get(h).post(h)`.
+- Findings detail shows the function data behind each advisory: the symbols, the fix
+  commit it was derived from, and the functions that commit changed.
+
+### Changed
+- `derived` entries outrank nothing: curated data wins when both exist for an advisory.
+
 ## [0.3.0] — 2026-10-09
 
 ### Added

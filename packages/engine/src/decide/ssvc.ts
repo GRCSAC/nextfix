@@ -62,7 +62,10 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
     }
   }
 
-  if (reach.confidence === 'derived') why.push('Function-level data for this advisory was derived automatically from the fix commit, not hand-verified.');
+  if (reach.confidence === 'derived' && f.symbols?.evidence) {
+    const ev = f.symbols.evidence;
+    why.push(`Function-level data was derived from the fix commit (${ev.commits[0] ?? 'unknown'}): it changed ${list(ev.changedFunctions.slice(0, 4))}${ev.changedFunctions.length > 4 ? ` and ${ev.changedFunctions.length - 4} more` : ''}, reachable through ${list(f.symbols.symbols)}. Not hand-verified.`);
+  } else if (reach.confidence === 'derived') why.push('Function-level data for this advisory was derived automatically from the fix commit, not hand-verified.');
 
   if (exposure.network === 'published') why.push(`Service is network-published: ${exposure.evidence.join('; ')}.`);
   else if (exposure.network === 'local-only') why.push('Service binds to loopback only; network exposure is limited to the host.');

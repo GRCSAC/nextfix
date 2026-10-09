@@ -32,6 +32,16 @@ export class Cache {
       .run(key, JSON.stringify(value), Date.now() + ttlMs);
   }
 
+  /** Delete one key. */
+  delete(key: string): void {
+    this.db.prepare('DELETE FROM kv WHERE k = ?').run(key);
+  }
+
+  /** The underlying connection, for sibling tables in the same file. */
+  raw(): DatabaseSync {
+    return this.db;
+  }
+
   close(): void {
     this.db.close();
   }

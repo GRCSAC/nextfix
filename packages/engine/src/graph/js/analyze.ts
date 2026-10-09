@@ -121,7 +121,12 @@ function requireSpec(init: ts.Expression | undefined): { spec: string; member?: 
   return undefined;
 }
 
-export function analyzeModule(file: string, rootDir: string): ModuleInfo {
+export interface AnalyzeOptions {
+  authRe?: RegExp;
+}
+
+export function analyzeModule(file: string, rootDir: string, options: AnalyzeOptions = {}): ModuleInfo {
+  const AUTH = options.authRe ?? AUTH_RE;
   const text = readFileSync(file, 'utf8');
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
   const rel = relative(rootDir, file).replace(/\\/g, '/');
@@ -332,7 +337,7 @@ export function analyzeModule(file: string, rootDir: string): ModuleInfo {
     }
     if (ts.isIdentifier(a)) {
       const b = importsByLocal.get(a.text);
-      if (AUTH_RE.test(a.text)) {
+      if (AUTH.test(a.text)) {
         route.guards.push(a.text);
         return;
       }
@@ -355,8 +360,25 @@ export function analyzeModule(file: string, rootDir: string): ModuleInfo {
       return;
     }
     const text = describeArg(a);
-    if (AUTH_RE.test(text)) route.guards.push(text);
+    if (AUTH.test(text)) route.guards.push(text);
     else route.middleware.push(text);
+  }
+
+  /** `app.route('/x').get(h).post(h2)`: walks the chain back to route(path) on an app ident. */
+  function routeChainPath(expr: ts.Expression): string | undefined {
+    let cur: ts.Expression = expr;
+    for (let i = 0; i < 12; i++) {
+      if (!ts.isCallExpression(cur) || !ts.isPropertyAccessExpression(cur.expression)) return undefined;
+      const recv = cur.expression.expression;
+      const name = cur.expression.name.text;
+      if (name === 'route' && ts.isIdentifier(recv) && (mod.appIdents.has(recv.text) || recv.text === 'app' || recv.text === 'router')) {
+        const a = cur.arguments[0];
+        return a && ts.isStringLiteralLike(a) ? a.text : '*';
+      }
+      if (!HTTP_METHODS.has(name)) return undefined;
+      cur = recv;
+    }
+    return undefined;
   }
 
   const visitCalls = (n: ts.Node) => {
@@ -366,7 +388,18 @@ export function analyzeModule(file: string, rootDir: string): ModuleInfo {
       const { line, col } = pos(n);
       let handled = false;
 
-      if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
+      if (ts.isPropertyAccessExpression(callee) && !ts.isIdentifier(callee.expression) && HTTP_METHODS.has(callee.name.text)) {
+        // Chained form: app.route('/x').get(handler).post(handler)
+        const chainPath = routeChainPath(callee.expression);
+        if (chainPath !== undefined) {
+          handled = true;
+          const route: RouteReg = { method: callee.name.text, path: chainPath, line, app: 'route', guards: [], middleware: [], handlerIds: [] };
+          for (const a of n.arguments) classifyHandlerArg(a, route);
+          if (route.handlerIds.length || route.guards.length) mod.routes.push(route);
+        }
+      }
+
+      if (!handled && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
         const recv = callee.expression.text;
         const m = callee.name.text;
         const isApp = mod.appIdents.has(recv) || (!importsByLocal.has(recv) && (recv === 'app' || recv === 'router'));

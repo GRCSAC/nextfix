@@ -81,6 +81,14 @@ export function Findings({ report, scanId, selectedId, query, onSelect }: Props)
   );
 }
 
+function shortCommit(url: string): string {
+  const m = /\/(?:commit|commits)\/([0-9a-f]{7,40})/i.exec(url);
+  if (m) return m[1]!.slice(0, 10);
+  const pr = /\/pull\/(\d+)/.exec(url);
+  if (pr) return `PR #${pr[1]}`;
+  return url.replace(/^https?:\/\/github\.com\//, '');
+}
+
 function Detail({ f, scanId, targetName, onClose }: { f: Finding; scanId: number; targetName: string; onClose: () => void }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (what: string, text: string) => {
@@ -121,6 +129,25 @@ function Detail({ f, scanId, targetName, onClose }: { f: Finding; scanId: number
         )}
         {f.reach.paths.length > 1 && <p className="empty">{f.reach.paths.length} entry points reach this call; the unauthenticated one is shown.</p>}
       </section>
+
+      {f.symbols && (
+        <section>
+          <h3>Function data · {f.symbols.source}{f.symbols.reviewed ? ' · reviewed' : ''}</h3>
+          <p className="small">
+            Vulnerable function{f.symbols.symbols.length === 1 ? '' : 's'}: <code>{f.symbols.symbols.join(', ')}</code>
+            {f.symbols.receiver && <span className="muted"> on {f.symbols.receiver}</span>}
+          </p>
+          {f.symbols.evidence ? (
+            <p className="small muted">
+              Derived from the fix commit <a href={f.symbols.evidence.commits[0]} target="_blank" rel="noreferrer">{shortCommit(f.symbols.evidence.commits[0] ?? '')}</a>, which changed <code>{f.symbols.evidence.changedFunctions.join(', ')}</code> in {f.symbols.evidence.files.join(', ')}.
+              {!f.symbols.evidence.repoMatch && ' The fix repository name does not match the package; check it.'}
+              {' '}Review with <code>nextfix symbols confirm {f.advisory.id} {f.component.name}</code>.
+            </p>
+          ) : (
+            <p className="small muted">Hand-curated from the advisory{f.symbols.references?.[0] ? <> (<a href={f.symbols.references[0]} target="_blank" rel="noreferrer">source</a>)</> : null}.</p>
+          )}
+        </section>
+      )}
 
       <section>
         <h3>Fix</h3>

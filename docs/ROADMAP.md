@@ -29,15 +29,18 @@ Dashboard rebuilt to the approved prototype (rail, tabs, command center ring, en
 component states, evidence & exceptions), brand palette and mark applied, Components /
 Evidence / Reports / Apps / Settings pages, Apache-2.0 license with the open-core split.
 
-## 0.4 — Make the evidence wider
+## 0.4 — Make the evidence wider (done 2026-10-09)
 
-- **Derived symbols:** given an advisory with a fix commit, diff the commit, list the changed
-  exported functions, store as `derived` entries, with a human review queue before they
-  count as `confirmed`. This is what turns `imported-unknown-symbol` into real answers at scale.
-- More Express patterns: `router.route('/x').get()`, `app.all`, regex paths, `express.static`.
-- Fastify and Koa entry points (same shape, different method names).
-- Config file `nextfix.config.json`: auth-guard names, ignored paths, entry-point overrides.
+Derived symbols from fix commits with evidence, review (`symbols confirm`) and export;
+`nextfix.config.json`; chained Express routes. Validation on the demo: five of six curated
+advisories reproduced, 12 of 14 uncurated advisories gained function data.
+
+Still open from this phase:
+- Resolve a package's public API across files (entry `main`/`exports` → re-exports), so ESM
+  libraries like moment yield `moment.locale` rather than the internal `getLocale`.
+- Fastify and Koa entry points; `express.static` and regex paths.
 - Container image inventory through a Syft/Grype adapter (external binary, optional).
+- A review page in the dashboard for derived entries (today it is the CLI).
 
 ## 0.5 — Team edition (separate commercial repo)
 

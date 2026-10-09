@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.3.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.4.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -105,8 +105,46 @@ Act · lodash@4.17.15 · CVE-2021-23337
 | `reachable` | an entry point leads to the vulnerable call; graded by auth, user input, exposure, EPSS, KEV | Attend / Act |
 
 Confidence is shown with every tier: `confirmed` (hand-curated function data), `derived`
-(extracted from the fix commit, coming), or `package-level` (no function data).
+(extracted from the fix commit), or `package-level` (no function data).
 The full rules are in [docs/DECISION-MODEL.md](docs/DECISION-MODEL.md).
+
+### Where the function data comes from
+
+A reachability tier below "imported" needs to know *which functions* of a package carry the
+advisory. NextFix has two sources:
+
+1. **Curated** entries in `packages/engine/data/vulnerable-symbols.json`, hand-checked.
+2. **Derived** entries, built during the scan for anything not curated: the advisory's fix
+   commit on GitHub is diffed, the touched lines are mapped to the functions that contain
+   them, and those are resolved to the file's public surface (exports, `obj.name = fn`
+   assignments, public callers up to three hops, callbacks passed as arguments). The entry
+   is stored on the machine with the commit as evidence and shown as confidence `derived`.
+
+```bash
+node packages/engine/src/cli.ts symbols derive GHSA-p6mc-m468-83gw lodash   # try one
+node packages/engine/src/cli.ts symbols list                                 # what this machine has derived
+node packages/engine/src/cli.ts symbols confirm GHSA-p6mc-m468-83gw lodash  # after you reviewed it
+node packages/engine/src/cli.ts symbols export reviewed.json                # confirmed entries as curated JSON
+```
+
+Set `GITHUB_TOKEN` to lift GitHub's unauthenticated limit; `--no-derive` skips the step.
+Derivation is per file: a package whose public API is assembled in a different file from the
+one the fix touched can come back with internal names or nothing, and NextFix says so.
+
+### Per-project settings
+
+Optional `nextfix.config.json` in the project root:
+
+```json
+{
+  "authGuards": ["checkSession", "requireTenant"],
+  "ignore": ["scripts", "tools"],
+  "internalRoutes": ["GET /healthz", "GET /metrics"]
+}
+```
+
+`authGuards` are regular expressions added to the built-in guard names (`authGuardsReplace: true`
+replaces them). `internalRoutes` are treated as authenticated.
 
 ## Run it
 
@@ -137,8 +175,9 @@ every tier. Its `package-lock.json` is committed; do not update its versions.
 | Reachability tiers + SSVC-style decision + score | ✅ |
 | Docker / compose exposure | ✅ |
 | OpenVEX + JSON report | ✅ |
-| Vulnerable-symbol data | 🟡 curated seed (7 advisories) |
-| Derived symbols from fix commits (automated, human-reviewed) | ⬜ |
+| Vulnerable-symbol data | ✅ curated seed (7 advisories) + derived from fix commits |
+| Derived symbols from fix commits, with a review and export path | ✅ |
+| `nextfix.config.json` (auth guards, ignored dirs, internal routes) | ✅ |
 | Python (Flask / FastAPI / Django) | ⬜ |
 | Go (govulncheck wrapper) | ⬜ |
 | Web UI: Overview, Findings, Components, Evidence, Reports, Apps, Settings | ✅ |

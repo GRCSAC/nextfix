@@ -25,6 +25,8 @@
   "why" sentence.
 - **Data hygiene:** vulnerable-symbol entries in `packages/engine/data/vulnerable-symbols.json`
   need a source and a reference. Never invent symbols; `imported-unknown-symbol` is the
-  honest fallback.
+  honest fallback. Derived entries live in the machine's cache, not the repo; the path into
+  the repo is `nextfix symbols confirm` (after reading the commit) then `symbols export`
+  and a pull request that merges the JSON.
 - **UX (when the UI lands):** simple, clean, professional, end-user first, mobile-symmetric;
   GRCSAC house fonts (system stacks, no webfonts); WCAG AA.

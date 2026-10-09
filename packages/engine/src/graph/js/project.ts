@@ -1,6 +1,6 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { analyzeModule, type CallSite, type FunctionInfo, type ModuleInfo, type RouteReg } from './analyze.ts';
+import { AUTH_RE, analyzeModule, type CallSite, type FunctionInfo, type ModuleInfo, type RouteReg } from './analyze.ts';
 import type { EntryPoint } from '../../types.ts';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.next', 'out', '.nextfix']);
@@ -40,13 +40,30 @@ export function discoverSourceFiles(rootDir: string): string[] {
   return out.sort();
 }
 
-export function analyzeProject(rootDir: string): ProjectGraph {
-  const files = discoverSourceFiles(rootDir);
+export interface ProjectOptions {
+  authGuards?: string[];
+  authGuardsReplace?: boolean;
+  ignore?: string[];
+  internalRoutes?: string[];
+}
+
+export function analyzeProject(rootDir: string, options: ProjectOptions = {}): ProjectGraph {
+  const extra = (options.authGuards ?? []).filter(Boolean);
+  const authRe = extra.length
+    ? new RegExp(options.authGuardsReplace ? extra.join('|') : `${AUTH_RE.source}|${extra.join('|')}`, 'i')
+    : undefined;
+  const ignore = new Set((options.ignore ?? []).map((d) => d.replace(/\\/g, '/').replace(/\/+$/, '')));
+  const files = discoverSourceFiles(rootDir).filter((f) => {
+    const rel = relative(rootDir, f).replace(/\\/g, '/');
+    for (const dir of ignore) if (rel === dir || rel.startsWith(dir + '/')) return false;
+    return true;
+  });
   const modules = new Map<string, ModuleInfo>();
   for (const f of files) {
-    const m = analyzeModule(f, rootDir);
+    const m = analyzeModule(f, rootDir, { authRe });
     modules.set(m.rel, m);
   }
+  const internal = new Set((options.internalRoutes ?? []).map((r) => r.trim().toUpperCase()));
   const rel = (abs: string) => relative(rootDir, abs).replace(/\\/g, '/');
 
   const functions = new Map<string, FunctionInfo>();
@@ -149,9 +166,12 @@ export function analyzeProject(rootDir: string): ProjectGraph {
       if (!handlerIds.length) continue;
       for (const ch of chains(m)) {
         const guards = [...ch.guards, ...r.guards];
+        const method = r.method.toUpperCase();
+        const path = joinPath(ch.prefix, r.path === '*' ? '/' : r.path);
+        if (internal.has(`${method} ${path}`.toUpperCase())) guards.push('internal (nextfix.config.json)');
         entryPoints.push({
-          method: r.method.toUpperCase(),
-          path: joinPath(ch.prefix, r.path === '*' ? '/' : r.path),
+          method,
+          path,
           file: m.rel,
           line: r.line,
           authenticated: guards.length > 0,
