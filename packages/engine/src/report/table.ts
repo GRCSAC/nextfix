@@ -23,7 +23,9 @@ export function renderSummary(r: ScanReport): string {
 
 export function renderTable(r: ScanReport): string {
   const rows = r.findings.map((f) => {
-    const entry = f.reach.paths[0] ? `${f.reach.paths[0].entry.method} ${f.reach.paths[0].entry.path}${f.reach.paths[0].entry.authenticated ? ' (auth)' : ''}` : '';
+    const p = f.reach.paths.find((x) => !x.entry.authenticated) ?? f.reach.paths[0];
+    const more = f.reach.paths.length > 1 ? ` +${f.reach.paths.length - 1}` : '';
+    const entry = p ? `${p.entry.method} ${p.entry.path}${p.entry.authenticated ? ' (auth)' : ''}${more}` : '';
     return [f.decision, String(f.score), `${f.component.name}@${f.component.version}`, f.advisory.cve ?? f.advisory.id, TIER_LABEL[f.reach.tier], entry, f.advisory.fixedVersion ? `→ ${f.advisory.fixedVersion}` : 'no fix'];
   });
   const head = ['DECISION', 'SCORE', 'PACKAGE', 'ADVISORY', 'REACH', 'ENTRY', 'FIX'];

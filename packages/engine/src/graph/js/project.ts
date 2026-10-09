@@ -78,13 +78,17 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
     }
   }
 
-  // Resolve an export name of a module to a function id.
+  // Resolve an export name of a module to a function id. Falls back to any function of that
+  // name in the module (class methods reached through an instance, `exports` built dynamically).
   function resolveExport(mod: ModuleInfo, name: string): string | undefined {
     const v = mod.exports.get(name);
-    if (!v) return undefined;
-    if (functions.has(v)) return v; // inline function id
-    const fn = mod.functions.find((f) => f.name === v);
-    return fn?.id;
+    if (v) {
+      if (functions.has(v)) return v; // inline function id
+      const fn = mod.functions.find((f) => f.name === v);
+      if (fn) return fn.id;
+    }
+    if (name === 'default') return undefined;
+    return mod.functions.find((f) => f.name === name)?.id;
   }
   function resolveLocalName(mod: ModuleInfo, name: string): string | undefined {
     const fn = mod.functions.find((f) => f.name === name);
@@ -113,6 +117,13 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
       }
       if (set.size) edges.set(fn.id, set);
       if (input.size) edgeInput.set(fn.id, input);
+    }
+    // A function reaches the callbacks and closures defined inside it.
+    for (const fn of m.functions) {
+      if (!fn.parentId) continue;
+      const set = edges.get(fn.parentId) ?? new Set();
+      set.add(fn.id);
+      edges.set(fn.parentId, set);
     }
   }
 
@@ -162,8 +173,14 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
   for (const m of modules.values()) {
     for (const r of m.routes) {
       if (r.mountLocal) continue;
-      const handlerIds = r.handlerIds.map((h) => (functions.has(h) ? h : resolveHandlerRef(h))).filter((h): h is string => !!h);
-      if (!handlerIds.length) continue;
+      const unresolved = [...r.unresolved];
+      const handlerIds: string[] = [];
+      for (const h of r.handlerIds) {
+        const id = functions.has(h) ? h : resolveHandlerRef(h);
+        if (id) handlerIds.push(id);
+        else unresolved.push(h.replace('#', '.'));
+      }
+      if (!handlerIds.length && !unresolved.length) continue;
       for (const ch of chains(m)) {
         const guards = [...ch.guards, ...r.guards];
         const method = r.method.toUpperCase();
@@ -178,6 +195,7 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
           guards,
           mounted: ch.mounted,
           handlerIds,
+          unresolvedHandlers: unresolved.length ? unresolved : undefined,
         });
       }
     }

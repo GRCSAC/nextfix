@@ -3,8 +3,13 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, relative, resolve } from 'node:path';
 
 export const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all', 'use', 'options', 'head']);
-/** Heuristic: an argument whose text looks like an auth guard. Configurable later. */
-export const AUTH_RE = /auth|login|session|jwt|token|passport|protect|guard|requireuser|isadmin|role|permission|verify|ensure/i;
+/**
+ * Heuristic: an argument whose text looks like an auth guard (something that rejects a request
+ * when the caller is not who they should be). Extended per project via nextfix.config.json.
+ */
+export const AUTH_RE = /auth(enticat|oriz|ed|z)?|logged|loginrequired|requirelogin|ensurelogin|checklogin|signedin|requireuser|requireadmin|isadmin|isuser|protect|guard|\brole|permission|permit|verifytoken|checktoken|requiretoken|validatetoken|jwt\(|expressjwt|checksession|requiresession|ensuresession|mustbe|denyall|\bacl\b/i;
+/** Common middleware that merely sets things up and never rejects a request. Checked before AUTH_RE. */
+export const NON_GUARD_RE = /^(session|cookiesession|expresssession|passport\.(initialize|session)|flash|cookieparser|helmet|cors|morgan|compression|bodyparser|express\.(json|urlencoded|static|raw|text)|lusca|csrf|csurf|logger|errorhandler|methodoverride|servestatic|favicon|multer|upload|limiter|ratelimit|i18n|robots|securitytxt|timeout|responsetime)\b/i;
 const REQ_NAMES = new Set(['req', 'request']);
 const RES_NAMES = new Set(['res', 'response']);
 
@@ -41,6 +46,8 @@ export interface FunctionInfo {
   col: number;
   params: string[];
   calls: CallSite[];
+  /** Enclosing function (callbacks and returned closures are reachable from it). */
+  parentId?: string;
 }
 
 export interface RouteReg {
@@ -51,6 +58,8 @@ export interface RouteReg {
   guards: string[];
   middleware: string[];
   handlerIds: string[];
+  /** Handler expressions that could not be resolved to a function (e.g. `login()`, `ctrl.index` on an unknown object). */
+  unresolved: string[];
   /** Local import name of a router mounted by app.use(path, router). */
   mountLocal?: string;
 }
@@ -127,6 +136,7 @@ export interface AnalyzeOptions {
 
 export function analyzeModule(file: string, rootDir: string, options: AnalyzeOptions = {}): ModuleInfo {
   const AUTH = options.authRe ?? AUTH_RE;
+  const isGuard = (t: string) => !NON_GUARD_RE.test(t) && AUTH.test(t);
   const text = readFileSync(file, 'utf8');
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
   const rel = relative(rootDir, file).replace(/\\/g, '/');
@@ -190,7 +200,8 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     }
   }
 
-  // ---- pass 1: app/router identifiers ----
+  // ---- pass 1: app/router identifiers, and `const x = new Y()` instances of imported classes ----
+  const instanceOf = new Map<string, ImportBinding>();
   const expressLocals = new Set(
     mod.imports.filter((b) => b.kind === 'package' && b.package === 'express' && (b.member === undefined || b.member === 'default')).map((b) => b.local),
   );
@@ -198,6 +209,11 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     mod.imports.filter((b) => b.kind === 'package' && b.package === 'express' && b.member === 'Router').map((b) => b.local),
   );
   const visitApps = (n: ts.Node) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isNewExpression(n.initializer)) {
+      const ctor = n.initializer.expression;
+      const b = ts.isIdentifier(ctor) ? importsByLocal.get(ctor.text) : ts.isPropertyAccessExpression(ctor) && ts.isIdentifier(ctor.expression) ? importsByLocal.get(ctor.expression.text) : undefined;
+      if (b?.kind === 'local') instanceOf.set(n.name.text, b);
+    }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isCallExpression(n.initializer)) {
       const callee = n.initializer.expression;
       if (ts.isIdentifier(callee) && expressLocals.has(callee.text)) {
@@ -225,9 +241,13 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     const p = n.parent;
     if (p && ts.isVariableDeclaration(p) && ts.isIdentifier(p.name)) return p.name.text;
     if (p && ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) return p.name.text;
+    // `this.handleLogin = (req, res) => …` / `exports.home = …` / `obj.x = function () {}`
+    if (p && ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(p.left)) return p.left.name.text;
     if (p && ts.isCallExpression(p)) return '<handler>';
+    if (p && ts.isReturnStatement(p)) return '<returned>';
     return '<anon>';
   }
+  const fnStack: FunctionInfo[] = [];
   const visitFns = (n: ts.Node) => {
     if (isFunctionLike(n)) {
       const { line, col } = pos(n);
@@ -240,10 +260,15 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
         col,
         params: n.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : '<pattern>')),
         calls: [],
+        parentId: fnStack[fnStack.length - 1]?.id,
       };
       fnByNode.set(n, info);
       mod.functions.push(info);
       if (!name.startsWith('<') && !fnByName.has(name)) fnByName.set(name, info);
+      fnStack.push(info);
+      ts.forEachChild(n, visitFns);
+      fnStack.pop();
+      return;
     }
     ts.forEachChild(n, visitFns);
   };
@@ -325,6 +350,8 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     return a.getText(sf).replace(/\s+/g, ' ').slice(0, 80);
   }
 
+  const relOf = (abs: string) => relative(rootDir, abs).replace(/\\/g, '/');
+
   function classifyHandlerArg(a: ts.Expression, route: RouteReg) {
     if (ts.isArrayLiteralExpression(a)) {
       a.elements.forEach((e) => classifyHandlerArg(e, route));
@@ -337,7 +364,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     }
     if (ts.isIdentifier(a)) {
       const b = importsByLocal.get(a.text);
-      if (AUTH.test(a.text)) {
+      if (isGuard(a.text)) {
         route.guards.push(a.text);
         return;
       }
@@ -353,15 +380,81 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
       }
       if (b?.kind === 'local' && b.file) {
         // handler exported by another module: resolved at project level via a synthetic id
-        route.handlerIds.push(`${relative(rootDir, b.file).replace(/\\/g, '/')}#${b.member ?? 'default'}`);
+        route.handlerIds.push(`${relOf(b.file)}#${b.member ?? 'default'}`);
         return;
       }
-      route.middleware.push(a.text);
+      if (b?.kind === 'package') route.middleware.push(a.text);
+      else route.unresolved.push(a.text);
       return;
     }
     const text = describeArg(a);
-    if (AUTH.test(text)) route.guards.push(text);
-    else route.middleware.push(text);
+    if (isGuard(text)) {
+      route.guards.push(text);
+      return;
+    }
+    // `controller.method` / `instance.method`: a handler living in another module.
+    if (ts.isPropertyAccessExpression(a) && ts.isIdentifier(a.expression)) {
+      const recv = a.expression.text;
+      const b = importsByLocal.get(recv) ?? instanceOf.get(recv);
+      if (b?.kind === 'local' && b.file) {
+        route.handlerIds.push(`${relOf(b.file)}#${a.name.text}`);
+        return;
+      }
+      if (b?.kind === 'package') {
+        route.middleware.push(text);
+        return;
+      }
+      route.unresolved.push(text);
+      return;
+    }
+    if (ts.isCallExpression(a)) {
+      // `login()` / `ctrl.handler(opts)`: a factory returning the handler; the factory's body
+      // (and the closure it returns) is what runs. `wrap(handler())` unwraps to the inner call.
+      const ref = factoryRef(a);
+      if (ref) route.handlerIds.push(ref);
+      else if (NON_GUARD_RE.test(text)) route.middleware.push(text);
+      else route.unresolved.push(text);
+      return;
+    }
+    route.unresolved.push(text);
+  }
+
+  /**
+   * Function id / cross-module ref for a factory call. A handler-shaped argument (a call, a
+   * function, a resolvable reference) means the callee is a wrapper such as asyncHandler(fn);
+   * otherwise the callee itself is the factory.
+   */
+  function factoryRef(call: ts.CallExpression, depth = 0): string | undefined {
+    if (depth < 2) {
+      for (const arg of call.arguments) {
+        if (ts.isCallExpression(arg)) {
+          const r = factoryRef(arg, depth + 1);
+          if (r) return r;
+        } else if (ts.isPropertyAccessExpression(arg) && ts.isIdentifier(arg.expression)) {
+          const b = importsByLocal.get(arg.expression.text) ?? instanceOf.get(arg.expression.text);
+          if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${arg.name.text}`;
+        } else if (ts.isIdentifier(arg)) {
+          const f = fnByName.get(arg.text);
+          if (f) return f.id;
+          const b = importsByLocal.get(arg.text);
+          if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${b.member ?? 'default'}`;
+        } else if (isFunctionLike(arg)) {
+          const f = fnByNode.get(arg);
+          if (f) return f.id;
+        }
+      }
+    }
+    const callee = call.expression;
+    if (ts.isIdentifier(callee)) {
+      const b = importsByLocal.get(callee.text);
+      if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${b.member ?? 'default'}`;
+      const f = fnByName.get(callee.text);
+      if (f) return f.id;
+    } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
+      const b = importsByLocal.get(callee.expression.text) ?? instanceOf.get(callee.expression.text);
+      if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${callee.name.text}`;
+    }
+    return undefined;
   }
 
   /** `app.route('/x').get(h).post(h2)`: walks the chain back to route(path) on an app ident. */
@@ -393,9 +486,9 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
         const chainPath = routeChainPath(callee.expression);
         if (chainPath !== undefined) {
           handled = true;
-          const route: RouteReg = { method: callee.name.text, path: chainPath, line, app: 'route', guards: [], middleware: [], handlerIds: [] };
+          const route: RouteReg = { method: callee.name.text, path: chainPath, line, app: 'route', guards: [], middleware: [], handlerIds: [], unresolved: [] };
           for (const a of n.arguments) classifyHandlerArg(a, route);
-          if (route.handlerIds.length || route.guards.length) mod.routes.push(route);
+          if (route.handlerIds.length || route.unresolved.length) mod.routes.push(route);
         }
       }
 
@@ -405,17 +498,26 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
         const isApp = mod.appIdents.has(recv) || (!importsByLocal.has(recv) && (recv === 'app' || recv === 'router'));
         if (isApp && HTTP_METHODS.has(m)) {
           handled = true;
-          const route: RouteReg = { method: m, path: '*', line, app: recv, guards: [...(globalGuards.get(recv) ?? [])], middleware: [], handlerIds: [] };
+          const route: RouteReg = { method: m, path: '*', line, app: recv, guards: [...(globalGuards.get(recv) ?? [])], middleware: [], handlerIds: [], unresolved: [] };
           const args = n.arguments;
           let i = 0;
           if (args[0] && ts.isStringLiteralLike(args[0])) {
             route.path = args[0].text;
             i = 1;
+          } else if (args[0] && ts.isArrayLiteralExpression(args[0]) && args[0].elements.every((e) => ts.isStringLiteralLike(e))) {
+            route.path = args[0].elements.map((e) => (e as ts.StringLiteralLike).text).join(' | ');
+            i = 1;
+          } else if (args[0] && (ts.isRegularExpressionLiteral(args[0]) || ts.isArrayLiteralExpression(args[0]))) {
+            route.path = args[0].getText(sf).slice(0, 60);
+            i = 1;
           }
           for (; i < args.length; i++) classifyHandlerArg(args[i]!, route);
-          if (m === 'use' && route.path === '*' && !route.mountLocal && !route.handlerIds.length) {
-            // app.use(guard) with no path: applies to every route registered afterwards.
-            if (route.guards.length) globalGuards.set(recv, [...(globalGuards.get(recv) ?? []), ...route.guards]);
+          if (m === 'use' && !route.mountLocal) {
+            // app.use(guard) with no path applies to every route registered afterwards; anything
+            // else passed to app.use is middleware, not an entry point.
+            const scoped = route.path !== '*' && route.path !== '/';
+            if (route.guards.length && !scoped) globalGuards.set(recv, [...(globalGuards.get(recv) ?? []), ...route.guards]);
+            else if (scoped && (route.handlerIds.length || route.unresolved.length)) mod.routes.push(route);
           } else {
             mod.routes.push(route);
           }
@@ -429,7 +531,10 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
 
       if (!handled) {
         let target: CallTarget | undefined;
-        if (ts.isIdentifier(callee)) {
+        if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
+          // this.method(): a call within the same class / object
+          target = { kind: 'local', name: callee.name.text };
+        } else if (ts.isIdentifier(callee)) {
           const b = importsByLocal.get(callee.text);
           if (b?.kind === 'package') target = { kind: 'external', package: b.package!, symbol: b.member ?? 'default' };
           else if (b?.kind === 'local') target = { kind: 'local', name: b.member ?? 'default', file: b.file };
@@ -437,11 +542,12 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
         } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
           const recv = callee.expression.text;
           const m = callee.name.text;
-          const b = importsByLocal.get(recv);
+          const b = importsByLocal.get(recv) ?? instanceOf.get(recv);
           if (b?.kind === 'package') {
             const named = b.member && b.member !== 'default';
             target = { kind: 'external', package: b.package!, symbol: named ? `${b.member}.${m}` : m };
           } else if (b?.kind === 'local') target = { kind: 'local', name: m, file: b.file };
+          else if (recv === 'this' || fnByName.has(m)) target = { kind: 'local', name: m };
           else if (RES_NAMES.has(recv) && hasParam(fnNode, recv)) target = { kind: 'framework', package: 'express', receiver: 'Response', symbol: m };
           else target = { kind: 'unknown', text: `${recv}.${m}` };
         }

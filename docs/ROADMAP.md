@@ -35,9 +35,15 @@ Derived symbols from fix commits with evidence, review (`symbols confirm`) and e
 `nextfix.config.json`; chained Express routes. Validation on the demo: five of six curated
 advisories reproduced, 12 of 14 uncurated advisories gained function data.
 
+0.4.1 validated the analyzer on Juice Shop, NodeGoat and Hackathon Starter and fixed what
+that found (see CHANGELOG). Coverage per routes file is now 87–96% of the registrations.
+
 Still open from this phase:
 - Resolve a package's public API across files (entry `main`/`exports` → re-exports), so ESM
-  libraries like moment yield `moment.locale` rather than the internal `getLocale`.
+  libraries like moment yield `moment.locale` rather than the internal `getLocale`, and
+  `marked`-style module-level fixes attribute to the exported callable.
+- Real taint: track which argument carries request data instead of "req appears in the chain".
+- Group duplicate components (same name@version at several lockfile paths) in the UI.
 - Fastify and Koa entry points; `express.static` and regex paths.
 - Container image inventory through a Syft/Grype adapter (external binary, optional).
 - A review page in the dashboard for derived entries (today it is the CLI).

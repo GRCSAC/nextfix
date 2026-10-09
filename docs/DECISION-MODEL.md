@@ -105,12 +105,21 @@ The score never changes a decision; it orders findings within a decision.
 
 ## 7. Known limits of the spike (say them out loud)
 
-- Entry points: Express only (`app`/`router` `.get/.post/…/.use`, `express.Router()` mounts,
-  `app.use(guard)` ordering). Guards are recognised by **name** (`auth`, `session`, `jwt`,
-  `passport`, `verify`, …), not by behaviour.
-- Call graph: intra-file by name plus `require('./x')` / `import` by export name. No dynamic
-  dispatch, no class hierarchies, no callbacks passed as values, no `this` resolution.
-- Taint: one level inside a function plus propagation along the found path. It is a hint.
+- Entry points: Express only (`app`/`router` `.get/.post/…/.use`, `app.route(path)` chains,
+  `express.Router()` mounts, `app.use(guard)` ordering). Guards are recognised by **name**
+  (`isLoggedIn`, `requireAuth`, `passport.authenticate`, `isAuthorized`, `verifyToken`, …)
+  after a non-guard list (`session()`, `passport.initialize()`, `helmet`, rate limiters, …)
+  is excluded, not by behaviour. Add project names via `nextfix.config.json`.
+- Handlers: inline functions, local functions, `controller.method`, `instance.method` of an
+  imported class, factory calls (`login()`) and one level of wrapper (`asyncHandler(fn())`).
+  Anything else is kept as an entry point with `unresolvedHandlers`, so the route still counts
+  but no path can be traced through it.
+- Call graph: intra-file by name, cross-file by export name or by any function of that name
+  in the target module, `this.method()`, and containment (a function reaches the callbacks and
+  closures defined inside it). No dynamic dispatch, no class hierarchies, no prototype chains.
+- Taint: any `req.*` in a call's arguments, or in a local assigned from one, propagated along
+  the found path. It is a hint: on Juice Shop it flags the challenge-notification chain because
+  `req` enters the handler, not because request data reaches the sanitizer.
 - Bundlers and tree-shaking are ignored: "present" means "in the lockfile".
 - Derived symbols are resolved within the file the fix touched. Packages that assemble their
   public API elsewhere (many ESM libraries) can yield internal names; those entries are

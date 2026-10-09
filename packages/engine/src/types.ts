@@ -85,6 +85,8 @@ export interface EntryPoint {
   /** false when a router file is never mounted on an app (path is relative to nothing). */
   mounted: boolean;
   handlerIds: string[];
+  /** Handlers NextFix could not follow into code (factories like `login()`, methods on unknown objects). */
+  unresolvedHandlers?: string[];
 }
 
 export interface PathHop {

@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.4.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.4.1` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -163,6 +163,28 @@ Scan history lives in `~/.nextfix/nextfix.sqlite`; advisory caches in `~/.nextfi
 
 The demo target `samples/express-shop` is a deliberately old Express app that exercises
 every tier. Its `package-lock.json` is committed; do not update its versions.
+
+## Validation on real applications
+
+Measured 2026-10-09 on three open-source Express applications, cloned fresh, scanned with
+derivation on (NextFix 0.4.1). "Routes" is what `grep` finds in the main routes file;
+"found" is NextFix's entry points in that file.
+
+| Application | Components | Advisories | Routes / found | Act · Attend · Watch · Set aside | Scan time |
+|---|---|---|---|---|---|
+| OWASP Juice Shop (TypeScript) | 1,339 | 87 | 109 / 105 | 1 · 9 · 16 · 63 | 5 s |
+| OWASP NodeGoat | 1,479 | 311 | 20 / 19 | 0 · 6 · 3 · 427 | 12 s |
+| Hackathon Starter | 689 | 2 | 102 / 89 | 0 · 0 · 0 · 2 | 1 s |
+
+What the first pass got wrong, and what changed because of it, is in the 0.4.1 entry of
+[CHANGELOG.md](CHANGELOG.md). What is still open: handlers NextFix cannot follow are listed
+per entry point as `unresolvedHandlers` (11 of 107 on Juice Shop, mostly third-party
+middleware factories), the request-data hint is coarse (any `req.*` in the chain counts),
+and `marked`-style advisories whose fix touches module-level tables in a multi-export file
+stay at `imported-unknown-symbol`.
+
+Juice Shop needed one line of `nextfix.config.json` to ignore `data/static/codefixes`, a
+folder of challenge snippets that re-declare the server's routes without their imports.
 
 ## Feature status
 

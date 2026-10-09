@@ -1,6 +1,6 @@
 {
   "name": "nextfix",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "NextFix — tells you what to fix next, and why. Reachability- and exposure-aware prioritization for application vulnerabilities.",
   "type": "module",

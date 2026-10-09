@@ -5,6 +5,33 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-09
+
+First validation against real applications (OWASP Juice Shop, OWASP NodeGoat, Hackathon
+Starter; see README "Validation on real applications"). Everything below came out of it.
+
+### Fixed
+- Routes whose handlers are `controller.method`, `instance.method`, a factory call such as
+  `login()`, or a wrapped factory such as `asyncHandler(handler())` were dropped. They now
+  resolve into the controller module, the class, or the factory; handlers NextFix still cannot
+  follow are kept as entry points and listed as `unresolvedHandlers`.
+- Setup middleware (`session()`, `passport.initialize()`, `passport.session()`, `flash`,
+  rate limiters, `lusca`, `helmet`, …) matched the auth-guard pattern and marked every later
+  route as authenticated. A non-guard list is checked first, and the guard pattern now looks
+  for guard-shaped names (`isLoggedIn`, `requireLogin`, `passport.authenticate`,
+  `isAuthorized`, `verifyToken`, …) rather than bare words like `login` or `session`.
+- Handlers that do their work inside nested callbacks or returned closures were not followed:
+  a function now reaches every function defined inside it.
+- `this.method = (req, res) => …` assignments inside constructors are named after the property.
+- Module-level fix changes (regex tables, constants) in a single-callable package derive to
+  `default`; in multi-export files the failure reason says so.
+- Array route paths print as `a | b`; the CLI table shows the unauthenticated path first and
+  how many other entry points reach the call.
+
+### Changed
+- Entry-point coverage on the three applications went from 23 / 4 / 12 routes to 91 / 21 / 107
+  (grep finds 102 / 20 / 109 registrations in the same files).
+
 ## [0.4.0] — 2026-10-09
 
 ### Added

@@ -45,6 +45,7 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
   let repoMatch = false;
   let internalOnly = false;
   let defaultCallable = false;
+  let moduleLevel = false;
 
   try {
     for (const c of candidates) {
@@ -63,7 +64,15 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
         for (const h of f.hunks) {
           for (const ln of h.touchedNewLines) {
             const chain = enclosingAll(facts, ln);
-            if (!chain.length) continue;
+            if (!chain.length) {
+              // Module-level change (a regex table, a constant). When the package is one callable,
+              // that callable is what reaches it.
+              if (facts.defaultIsFunction) {
+                hit = true;
+                moduleLevel = true;
+              }
+              continue;
+            }
             hit = true;
             // Record the innermost named function; resolve outward until something public is reached
             // (a change inside a nested callback belongs to the function that owns the callback).
@@ -90,8 +99,8 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
   }
 
   if (!used.length) return fail(opts, advisory, pkg, 'fix links found but no diff could be fetched or it touched only tests/docs');
-  if (!symbols.size && changed.size && defaultCallable) symbols.set('default', 'package-is-one-function');
-  if (!symbols.size) return fail(opts, advisory, pkg, changed.size ? `fix changed internal function(s) ${[...changed].join(', ')} with no public caller in the same file` : 'fix touched no function bodies');
+  if (!symbols.size && (changed.size || moduleLevel) && defaultCallable) symbols.set('default', moduleLevel && !changed.size ? 'module-level-change' : 'package-is-one-function');
+  if (!symbols.size) return fail(opts, advisory, pkg, changed.size ? `fix changed internal function(s) ${[...changed].join(', ')} with no public caller in the same file` : 'fix touched no function bodies (module-level change in a multi-export file)');
 
   const entry: SymbolEntry = {
     ids,
@@ -105,7 +114,7 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
     evidence: {
       commits: used,
       files: [...files],
-      changedFunctions: [...changed],
+      changedFunctions: changed.size ? [...changed] : moduleLevel ? ['<module scope>'] : [],
       resolvedVia: Object.fromEntries(symbols),
       repoMatch,
       derivedAt: new Date().toISOString(),
