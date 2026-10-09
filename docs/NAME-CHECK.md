@@ -17,8 +17,10 @@ attorney should run a proper clearance before filing.
 | `nextfix.io`, `nextfix.ai`, `getnextfix.com` | no DNS; likely available. |
 
 **Assessment:** clearable. The only security-adjacent use (`nextfix.dev`) is a small, new,
-non-US website scanner with no sign of a trademark. Our products live on `*.grcsac.com`
-anyway, so the `.com` is not a blocker.
+non-US website scanner with no sign of a trademark.
 
-**Suggested actions (Paul):** register `nextfix.io` if a standalone domain is wanted; file an
-intent-to-use USPTO application for NEXTFIX in classes 9 and 42 before public launch.
+**Decision (Paul, 2026-10-09):** NextFix is marketed at **nextfix.grcsac.com** under the
+GRCSAC umbrella, like every other GRCSAC product. No standalone domain will be registered.
+
+**Remaining action (Paul):** file an intent-to-use USPTO application for NEXTFIX in classes
+9 and 42 before public launch.
