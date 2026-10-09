@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.5.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.5.2` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -174,9 +174,11 @@ derivation on (NextFix 0.4.1). "Routes" is what `grep` finds in the main routes 
 
 | Application | Components | Advisories | Routes / found | Act · Attend · Watch · Set aside | Scan time |
 |---|---|---|---|---|---|
-| OWASP Juice Shop (TypeScript) | 1,339 | 87 | 109 / 105 | 1 · 9 · 16 · 63 | 5 s |
-| OWASP NodeGoat | 1,479 | 311 | 20 / 19 | 0 · 6 · 3 · 427 | 12 s |
-| Hackathon Starter | 689 | 2 | 102 / 89 | 0 · 0 · 0 · 2 | 1 s |
+| OWASP Juice Shop (Express, TypeScript) | 1,178 | 87 | 109 / 105 | 0 · 10 · 16 · 61 | 5 s |
+| OWASP NodeGoat (Express) | 1,091 | 311 | 20 / 19 | 0 · 4 · 5 · 302 | 12 s |
+| Hackathon Starter (Express) | 689 | 2 | 102 / 89 | 0 · 0 · 0 · 2 | 1 s |
+| Fastify demo (fastify-cli, autoload, TypeScript) | 462 | 0 | 15 / 15 | — | 1 s |
+| node-typescript-koa-rest (Koa, koa-jwt) | 877 | 119 | 7 / 7 | 0 · 4 · 2 · 113 | 6 s |
 
 What the first pass got wrong, and what changed because of it, is in the 0.4.1 entry of
 [CHANGELOG.md](CHANGELOG.md). What is still open: handlers NextFix cannot follow are listed
@@ -193,7 +195,7 @@ folder of challenge snippets that re-declare the server's routes without their i
 |---|---|
 | npm lockfile inventory (v2/v3) | ✅ |
 | OSV + EPSS + KEV with local cache and offline mode | ✅ |
-| JavaScript/TypeScript call graph, Express entry points, auth guards, mounts | ✅ spike |
+| JavaScript/TypeScript call graph; Express, Fastify (incl. autoload) and Koa entry points, auth guards, mounts | ✅ |
 | Request-data tracing, argument by argument along the path | ✅ |
 | Reachability tiers + SSVC-style decision + score | ✅ |
 | Docker / compose exposure | ✅ |
@@ -217,7 +219,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 
 - Executive one-page PDF export; scheduled re-scans; e-mail or Slack digest.
 - Jira / GitHub Issues push (copy-as-ticket covers it manually today).
-- Fastify, Koa, NestJS, Hapi entry-point detection.
+- NestJS and Hapi entry-point detection.
 - Framework objects beyond Express `res` (e.g. Next.js API routes, serverless handlers).
 - Import of a CycloneDX SBOM instead of a lockfile.
 - Deeper taint (sanitizers, multi-level, object fields).

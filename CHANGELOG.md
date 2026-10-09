@@ -5,6 +5,31 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-10-09
+
+### Added
+- **Fastify** entry points: `fastify.get(path, handler)`, route options objects
+  (`{ preHandler, onRequest, … , handler }`), `fastify.route({ method, url, handler })`,
+  `fastify.register(plugin, { prefix })` for plugin modules, in-file plugin functions, and
+  scoped `addHook('onRequest', guard)`. `@fastify/autoload`: every route module under the
+  autoload directory is mounted at its folder path (`routes/api/tasks/index.ts` →
+  `/api/tasks`) and `autohooks` files guard their folder; a module that registers autoload
+  is the root when nothing mounts it (fastify-cli apps).
+- **Koa** entry points with `@koa/router`, `koa-router` or any package class named `…Router`:
+  `new Router({ prefix })`, `router.prefix()`, named routes, `router.use(guard)`,
+  `app.use(router.routes())` and `router.use('/p', sub.routes())` mounts, routers exported by
+  name. `ctx` is a request-data root, so `ctx.request.body.x` is traced like `req.body.x`.
+- Inline hooks and middleware whose body rejects requests (401/403, `unauthorized`,
+  `ctx.throw`) count as guards and are named by file and line.
+- Handlers reached through barrel files (`export { default as user } from './user'`) resolve
+  to the controller that defines them.
+- `export { router }` named exports are recognised; "unprotected"/"public" names never
+  count as guards.
+- Derivation has a time budget per scan (90 s by default); what is left is picked up next scan.
+
+Validated on the official Fastify demo (15 routes, 13 behind the folder autohook) and a Koa
+REST template (7 routes, 6 behind `koa-jwt`), both now in the README table.
+
 ## [0.5.1] — 2026-10-09
 
 ### Changed

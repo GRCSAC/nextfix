@@ -112,11 +112,16 @@ The score never changes a decision; it orders findings within a decision.
 
 ## 7. Known limits of the spike (say them out loud)
 
-- Entry points: Express only (`app`/`router` `.get/.post/…/.use`, `app.route(path)` chains,
-  `express.Router()` mounts, `app.use(guard)` ordering). Guards are recognised by **name**
-  (`isLoggedIn`, `requireAuth`, `passport.authenticate`, `isAuthorized`, `verifyToken`, …)
+- Entry points: Express (`app`/`router` methods, `app.route(path)` chains, `express.Router()`
+  mounts, `app.use(guard)` ordering), Fastify (route options hooks, `route({…})`,
+  `register(plugin, { prefix })`, `addHook` scopes, `@fastify/autoload` folder prefixes and
+  `autohooks`), and Koa (`@koa/router`-style routers incl. third-party `…Router` classes,
+  prefixes, `router.use(guard)`, `app.use(router.routes())` mounts). Guards are recognised by
+  **name** (`isLoggedIn`, `requireAuth`, `passport.authenticate`, `isAuthorized`, `jwt(`, …)
   after a non-guard list (`session()`, `passport.initialize()`, `helmet`, rate limiters, …)
-  is excluded, not by behaviour. Add project names via `nextfix.config.json`.
+  and an anti-guard list (`unprotected`, `public…`) are excluded, or by **body** for inline
+  functions that reject requests (401/403, `unauthorized`, `ctx.throw`). Add project names
+  via `nextfix.config.json`. Not covered: NestJS decorators, Hapi, serverless handlers.
 - Handlers: inline functions, local functions, `controller.method`, `instance.method` of an
   imported class, factory calls (`login()`) and one level of wrapper (`asyncHandler(fn())`).
   Anything else is kept as an entry point with `unresolvedHandlers`, so the route still counts

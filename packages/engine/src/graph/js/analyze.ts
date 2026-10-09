@@ -8,10 +8,16 @@ export const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'a
  * when the caller is not who they should be). Extended per project via nextfix.config.json.
  */
 export const AUTH_RE = /auth(enticat|oriz|ed|z)?|logged|loginrequired|requirelogin|ensurelogin|checklogin|signedin|requireuser|requireadmin|isadmin|isuser|protect|guard|\brole|permission|permit|verifytoken|checktoken|requiretoken|validatetoken|jwt\(|expressjwt|checksession|requiresession|ensuresession|mustbe|denyall|\bacl\b/i;
+/** Names that say the opposite of a guard. */
+export const NOT_GUARD_RE = /unprotected|unauthenticated|optionalauth|noauth|public(router|routes)/i;
 /** Common middleware that merely sets things up and never rejects a request. Checked before AUTH_RE. */
 export const NON_GUARD_RE = /^(session|cookiesession|expresssession|passport\.(initialize|session)|flash|cookieparser|helmet|cors|morgan|compression|bodyparser|express\.(json|urlencoded|static|raw|text)|lusca|csrf|csurf|logger|errorhandler|methodoverride|servestatic|favicon|multer|upload|limiter|ratelimit|i18n|robots|securitytxt|timeout|responsetime)\b/i;
-const REQ_NAMES = new Set(['req', 'request']);
+/** Parameter names that carry the HTTP request: Express/Fastify `req`/`request`, Koa `ctx`. */
+export const REQ_NAMES = new Set(['req', 'request', 'ctx', 'context']);
 const RES_NAMES = new Set(['res', 'response']);
+/** Identifiers assumed to be an app or router when nothing better is known (plugin parameters). */
+const APP_NAMES = new Set(['app', 'router', 'fastify', 'server', 'instance', 'api', 'koa']);
+const FASTIFY_HOOKS = new Set(['onRequest', 'preParsing', 'preValidation', 'preHandler', 'preSerialization']);
 
 export interface ImportBinding {
   local: string;
@@ -69,8 +75,10 @@ export interface RouteReg {
   handlerIds: string[];
   /** Handler expressions that could not be resolved to a function (e.g. `login()`, `ctrl.index` on an unknown object). */
   unresolved: string[];
-  /** Local import name of a router mounted by app.use(path, router). */
+  /** Local import name of a router / plugin mounted by app.use(path, router) or fastify.register(plugin, { prefix }). */
   mountLocal?: string;
+  /** Name of the function the registration sits in (Fastify plugins defined in the same file). */
+  inFunction?: string;
 }
 
 export interface ModuleInfo {
@@ -84,9 +92,15 @@ export interface ModuleInfo {
   isRootApp: boolean;
   /** export name -> local identifier (or a function id for inline functions) */
   exports: Map<string, string>;
+  /** `export { x as y } from './f'` / `export * from './f'`: exported name ('*' for all) -> imported name and file */
+  reexports: { exported: string; imported: string; file: string }[];
   exportsRouter?: string;
   listenLocalOnly?: boolean;
   listens: boolean;
+  /** Fastify `@fastify/autoload` registrations: every route module under `dir` is mounted at its folder path. */
+  autoload: { dir: string; prefix: string }[];
+  /** Guards installed with `addHook` anywhere in this module (autohooks files apply them to their folder). */
+  hookGuards: string[];
 }
 
 export function splitSpecifier(spec: string): { pkg: string; sub?: string } {
@@ -145,7 +159,15 @@ export interface AnalyzeOptions {
 
 export function analyzeModule(file: string, rootDir: string, options: AnalyzeOptions = {}): ModuleInfo {
   const AUTH = options.authRe ?? AUTH_RE;
-  const isGuard = (t: string) => !NON_GUARD_RE.test(t) && AUTH.test(t);
+  const isGuard = (t: string) => !NON_GUARD_RE.test(t) && !NOT_GUARD_RE.test(t) && AUTH.test(t);
+  /** An inline hook/middleware whose body rejects requests (401/403, unauthorized, throw) is a guard. */
+  const GUARD_BODY_RE = /unauthorized|forbidden|\b40[13]\b|\.status\(\s*40[13]|\.code\(\s*40[13]|ctx\.throw\(|\bthrow\b/i;
+  const isGuardNode = (a: ts.Node) => {
+    const text = a.getText(sf).replace(/\s+/g, ' ');
+    if (isGuard(text.slice(0, 80))) return true;
+    if (isFunctionLike(a)) return GUARD_BODY_RE.test(text) && !NON_GUARD_RE.test(text.slice(0, 80));
+    return false;
+  };
   const text = readFileSync(file, 'utf8');
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
   const rel = relative(rootDir, file).replace(/\\/g, '/');
@@ -164,7 +186,10 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     appIdents: new Set(),
     isRootApp: false,
     exports: new Map(),
+    reexports: [],
     listens: false,
+    autoload: [],
+    hookGuards: [],
   };
   const importsByLocal = new Map<string, ImportBinding>();
 
@@ -209,29 +234,52 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     }
   }
 
-  // ---- pass 1: app/router identifiers, and `const x = new Y()` instances of imported classes ----
+  // ---- pass 1: app/router identifiers (Express, Fastify, Koa), and `const x = new Y()` instances of imported classes ----
   const instanceOf = new Map<string, ImportBinding>();
-  const expressLocals = new Set(
-    mod.imports.filter((b) => b.kind === 'package' && b.package === 'express' && (b.member === undefined || b.member === 'default')).map((b) => b.local),
-  );
-  const routerLocals = new Set(
-    mod.imports.filter((b) => b.kind === 'package' && b.package === 'express' && b.member === 'Router').map((b) => b.local),
-  );
+  /** Koa router prefix (`new Router({ prefix })` / `router.prefix()`), by router identifier. */
+  const routerPrefix = new Map<string, string>();
+  const pkgLocals = (pkgs: string[], members: (string | undefined)[]) =>
+    new Set(mod.imports.filter((b) => b.kind === 'package' && pkgs.includes(b.package!) && members.includes(b.member)).map((b) => b.local));
+  const expressLocals = pkgLocals(['express'], [undefined, 'default']);
+  const routerLocals = pkgLocals(['express'], ['Router']);
+  const fastifyLocals = pkgLocals(['fastify'], [undefined, 'default', 'fastify']);
+  const koaLocals = pkgLocals(['koa'], [undefined, 'default']);
+  const koaRouterLocals = pkgLocals(['@koa/router', 'koa-router'], [undefined, 'default', 'Router']);
+  const prefixOf = (arg: ts.Expression | undefined): string | undefined => {
+    if (!arg || !ts.isObjectLiteralExpression(arg)) return undefined;
+    for (const p of arg.properties) {
+      if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'prefix' && ts.isStringLiteralLike(p.initializer)) return p.initializer.text;
+    }
+    return undefined;
+  };
   const visitApps = (n: ts.Node) => {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isNewExpression(n.initializer)) {
       const ctor = n.initializer.expression;
       const b = ts.isIdentifier(ctor) ? importsByLocal.get(ctor.text) : ts.isPropertyAccessExpression(ctor) && ts.isIdentifier(ctor.expression) ? importsByLocal.get(ctor.expression.text) : undefined;
       if (b?.kind === 'local') instanceOf.set(n.name.text, b);
+      if (ts.isIdentifier(ctor) && koaLocals.has(ctor.text)) {
+        mod.appIdents.add(n.name.text);
+        mod.isRootApp = true;
+      } else if (ts.isIdentifier(ctor) && (koaRouterLocals.has(ctor.text) || (importsByLocal.get(ctor.text)?.kind === 'package' && /router$/i.test(ctor.text)))) {
+        // `new Router()` from @koa/router, or any package class named …Router (koa-swagger-decorator's SwaggerRouter, …)
+        mod.appIdents.add(n.name.text);
+        const p = prefixOf(n.initializer.arguments?.[0]);
+        if (p) routerPrefix.set(n.name.text, p);
+      }
     }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isCallExpression(n.initializer)) {
       const callee = n.initializer.expression;
-      if (ts.isIdentifier(callee) && expressLocals.has(callee.text)) {
+      if (ts.isIdentifier(callee) && (expressLocals.has(callee.text) || fastifyLocals.has(callee.text))) {
         mod.appIdents.add(n.name.text);
         mod.isRootApp = true;
       } else if (ts.isIdentifier(callee) && routerLocals.has(callee.text)) {
         mod.appIdents.add(n.name.text);
       } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && expressLocals.has(callee.expression.text) && callee.name.text === 'Router') {
         mod.appIdents.add(n.name.text);
+      } else if (ts.isCallExpression(callee) && requireSpec(callee)?.spec === 'fastify') {
+        // const fastify = require('fastify')({ logger: true })
+        mod.appIdents.add(n.name.text);
+        mod.isRootApp = true;
       }
     }
     ts.forEachChild(n, visitApps);
@@ -392,8 +440,57 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
 
   // ---- pass 3: calls, routes, exports ----
   const globalGuards = new Map<string, string[]>();
+  /** Fastify plugins defined in this file and registered with a prefix: routes inside them get it. */
+  const localPluginPrefix = new Map<string, { prefix: string; guards: string[] }>();
+  /** Koa routers of this file mounted on an app or another router of this file. */
+  const mountSame: { router: string; prefix: string; guards: string[]; onto: string }[] = [];
+
+  /** `x.routes()` / `x.middleware()` of a Koa router: same-file router or local import. */
+  function koaRoutesOf(a: ts.Expression): { kind: 'same' | 'local'; name: string } | undefined {
+    if (!ts.isCallExpression(a) || !ts.isPropertyAccessExpression(a.expression) || !ts.isIdentifier(a.expression.expression)) return undefined;
+    if (!['routes', 'middleware', 'allowedMethods'].includes(a.expression.name.text)) return undefined;
+    if (a.expression.name.text === 'allowedMethods') return undefined;
+    const x = a.expression.expression.text;
+    const b = importsByLocal.get(x);
+    if (b?.kind === 'local') return { kind: 'local', name: x };
+    if (mod.appIdents.has(x) || APP_NAMES.has(x)) return { kind: 'same', name: x };
+    return undefined;
+  }
+
+  /** Fastify hook values (`preHandler: auth`, `onRequest: [a, b]`): guards or middleware, never handlers. */
+  function classifyHook(v: ts.Expression, route: RouteReg) {
+    if (ts.isArrayLiteralExpression(v)) {
+      v.elements.forEach((e) => classifyHook(e, route));
+      return;
+    }
+    const text = describeArg(v);
+    if (isGuardNode(v)) route.guards.push(text);
+    else route.middleware.push(text);
+  }
+
+  /** Directory named by an autoload `dir:` option: a string, or `path.join(__dirname, 'routes')`-style call. */
+  function autoloadDir(opts: ts.Expression | undefined): string | undefined {
+    if (!opts || !ts.isObjectLiteralExpression(opts)) return undefined;
+    const dirProp = opts.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'dir');
+    if (!dirProp) return undefined;
+    const v = dirProp.initializer;
+    if (ts.isStringLiteralLike(v)) return resolve(dirname(file), v.text);
+    if (ts.isCallExpression(v)) {
+      const parts = v.arguments.filter((a): a is ts.StringLiteralLike => ts.isStringLiteralLike(a)).map((a) => a.text);
+      if (parts.length) return resolve(dirname(file), ...parts);
+    }
+    return undefined;
+  }
+  function autoloadPrefix(opts: ts.Expression | undefined): string {
+    if (!opts || !ts.isObjectLiteralExpression(opts)) return '';
+    const direct = prefixOf(opts);
+    if (direct) return direct;
+    const inner = opts.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'options');
+    return inner ? prefixOf(inner.initializer) ?? '' : '';
+  }
 
   function describeArg(a: ts.Expression): string {
+    if (isFunctionLike(a)) return `inline check (${rel}:${pos(a).line})`;
     return a.getText(sf).replace(/\s+/g, ' ').slice(0, 80);
   }
 
@@ -439,12 +536,15 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
       route.guards.push(text);
       return;
     }
-    // `controller.method` / `instance.method`: a handler living in another module.
+    // `controller.method` / `instance.method`: a handler living in another module. When the
+    // receiver is a named import (`import { user } from './controller'`), keep the member so a
+    // barrel re-export can be followed: file#user.getUsers.
     if (ts.isPropertyAccessExpression(a) && ts.isIdentifier(a.expression)) {
       const recv = a.expression.text;
       const b = importsByLocal.get(recv) ?? instanceOf.get(recv);
       if (b?.kind === 'local' && b.file) {
-        route.handlerIds.push(`${relOf(b.file)}#${a.name.text}`);
+        const member = b.member && b.member !== 'default' && importsByLocal.has(recv) ? `${b.member}.` : '';
+        route.handlerIds.push(`${relOf(b.file)}#${member}${a.name.text}`);
         return;
       }
       if (b?.kind === 'package') {
@@ -542,15 +642,66 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
       if (!handled && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
         const recv = callee.expression.text;
         const m = callee.name.text;
-        const isApp = mod.appIdents.has(recv) || (!importsByLocal.has(recv) && (recv === 'app' || recv === 'router'));
-        if (isApp && HTTP_METHODS.has(m)) {
+        const isApp = mod.appIdents.has(recv) || (!importsByLocal.has(recv) && (APP_NAMES.has(recv) || /router$/i.test(recv)));
+        const newRoute = (method: string): RouteReg => ({ method, path: '*', line, app: recv, guards: [...(globalGuards.get(recv) ?? [])], middleware: [], handlerIds: [], unresolved: [], inFunction: fn.name });
+        if (isApp && m === 'route' && n.arguments[0] && ts.isObjectLiteralExpression(n.arguments[0])) {
+          // Fastify: fastify.route({ method: 'GET', url: '/x', preHandler: [...], handler })
           handled = true;
-          const route: RouteReg = { method: m, path: '*', line, app: recv, guards: [...(globalGuards.get(recv) ?? [])], middleware: [], handlerIds: [], unresolved: [] };
+          const route = newRoute('get');
+          for (const p of n.arguments[0].properties) {
+            if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) continue;
+            const key = p.name.text;
+            if (key === 'method') route.method = ts.isStringLiteralLike(p.initializer) ? p.initializer.text.toLowerCase() : ts.isArrayLiteralExpression(p.initializer) ? p.initializer.elements.map((e) => (ts.isStringLiteralLike(e) ? e.text.toLowerCase() : '?')).join('|') : 'all';
+            else if (key === 'url' || key === 'path') route.path = ts.isStringLiteralLike(p.initializer) ? p.initializer.text : '*';
+            else if (key === 'handler') classifyHandlerArg(p.initializer, route);
+            else if (FASTIFY_HOOKS.has(key)) classifyHook(p.initializer, route);
+          }
+          mod.routes.push(route);
+        } else if (isApp && m === 'register') {
+          // Fastify: fastify.register(plugin, { prefix: '/x' })
+          handled = true;
+          const [plugin, opts] = n.arguments;
+          const prefix = prefixOf(opts) ?? '';
+          const spec = plugin ? requireSpec(plugin)?.spec : undefined;
+          if (plugin && ts.isIdentifier(plugin)) {
+            const b = importsByLocal.get(plugin.text);
+            if (b?.kind === 'package' && b.package === '@fastify/autoload') {
+              const dir = autoloadDir(opts);
+              if (dir) mod.autoload.push({ dir, prefix: autoloadPrefix(opts) });
+            } else if (b?.kind === 'local') mod.routes.push({ ...newRoute('use'), path: prefix || '*', mountLocal: plugin.text, guards: [...(globalGuards.get(recv) ?? [])] });
+            else if (!b && fnByName.has(plugin.text)) localPluginPrefix.set(plugin.text, { prefix, guards: [...(globalGuards.get(recv) ?? [])] });
+          } else if (spec && (spec.startsWith('.') || spec.startsWith('/'))) {
+            const local = `<register:${spec}>`;
+            addImport(local, spec, undefined, line);
+            mod.routes.push({ ...newRoute('use'), path: prefix || '*', mountLocal: local, guards: [...(globalGuards.get(recv) ?? [])] });
+          } else if (plugin && (isFunctionLike(plugin) || ts.isArrowFunction(plugin))) {
+            const f = fnByNode.get(plugin);
+            if (f) localPluginPrefix.set(f.name, { prefix, guards: [...(globalGuards.get(recv) ?? [])] });
+          }
+        } else if (isApp && m === 'addHook' && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && FASTIFY_HOOKS.has(n.arguments[0].text) && n.arguments[1]) {
+          // Fastify: fastify.addHook('onRequest', fastify.authenticate) applies to later routes in this scope.
+          handled = true;
+          const text = describeArg(n.arguments[1]);
+          if (isGuardNode(n.arguments[1])) {
+            globalGuards.set(recv, [...(globalGuards.get(recv) ?? []), text]);
+            mod.hookGuards.push(text);
+          }
+        } else if (isApp && m === 'prefix' && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0])) {
+          handled = true;
+          routerPrefix.set(recv, n.arguments[0].text);
+        } else if (isApp && HTTP_METHODS.has(m)) {
+          handled = true;
+          const route = newRoute(m);
           const args = n.arguments;
           let i = 0;
           if (args[0] && ts.isStringLiteralLike(args[0])) {
             route.path = args[0].text;
             i = 1;
+            // Koa named route: router.get('users', '/users', handler)
+            if (args[1] && ts.isStringLiteralLike(args[1]) && !args[0].text.startsWith('/') && args[1].text.startsWith('/')) {
+              route.path = args[1].text;
+              i = 2;
+            }
           } else if (args[0] && ts.isArrayLiteralExpression(args[0]) && args[0].elements.every((e) => ts.isStringLiteralLike(e))) {
             route.path = args[0].elements.map((e) => (e as ts.StringLiteralLike).text).join(' | ');
             i = 1;
@@ -558,13 +709,31 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
             route.path = args[0].getText(sf).slice(0, 60);
             i = 1;
           }
-          for (; i < args.length; i++) classifyHandlerArg(args[i]!, route);
+          // Fastify route options: fastify.get('/x', { preHandler: [auth], schema }, handler)
+          if (i > 0 && args[i] && ts.isObjectLiteralExpression(args[i]!) && m !== 'use') {
+            for (const p of (args[i] as ts.ObjectLiteralExpression).properties) {
+              if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) continue;
+              if (p.name.text === 'handler') classifyHandlerArg(p.initializer, route);
+              else if (FASTIFY_HOOKS.has(p.name.text)) classifyHook(p.initializer, route);
+            }
+            i++;
+          }
+          // Koa: app.use(router.routes()) / router.use('/p', sub.routes()) mounts a router; that
+          // argument is a mount, never a guard or handler.
+          const mounted = m === 'use' ? args.map((a) => koaRoutesOf(a)).find((x) => x) : undefined;
+          for (; i < args.length; i++) if (!(m === 'use' && koaRoutesOf(args[i]!))) classifyHandlerArg(args[i]!, route);
           if (m === 'use' && !route.mountLocal) {
-            // app.use(guard) with no path applies to every route registered afterwards; anything
-            // else passed to app.use is middleware, not an entry point.
-            const scoped = route.path !== '*' && route.path !== '/';
-            if (route.guards.length && !scoped) globalGuards.set(recv, [...(globalGuards.get(recv) ?? []), ...route.guards]);
-            else if (scoped && (route.handlerIds.length || route.unresolved.length)) mod.routes.push(route);
+            if (mounted) {
+              const prefix = route.path === '*' ? '' : route.path;
+              if (mounted.kind === 'same') mountSame.push({ router: mounted.name, prefix, guards: route.guards, onto: recv });
+              else mod.routes.push({ ...route, path: prefix || '*', mountLocal: mounted.name });
+            } else {
+              // app.use(guard) with no path applies to every route registered afterwards; anything
+              // else passed to app.use is middleware, not an entry point.
+              const scoped = route.path !== '*' && route.path !== '/';
+              if (route.guards.length && !scoped) globalGuards.set(recv, [...(globalGuards.get(recv) ?? []), ...route.guards]);
+              else if (scoped && (route.handlerIds.length || route.unresolved.length)) mod.routes.push(route);
+            }
           } else {
             mod.routes.push(route);
           }
@@ -645,12 +814,69 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     const mods = ts.canHaveModifiers(st) ? ts.getModifiers(st) : undefined;
     const isExport = mods?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
     const isDefault = mods?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
-    if (isExport && ts.isFunctionDeclaration(st) && st.name) mod.exports.set(isDefault ? 'default' : st.name.text, st.name.text);
+    if (ts.isExportDeclaration(st)) {
+      const spec = st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier) ? st.moduleSpecifier.text : undefined;
+      if (spec) {
+        // `export { default as user } from './user'` / `export * from './x'`: a barrel.
+        const target = resolveLocal(file, spec);
+        if (target) {
+          if (!st.exportClause) mod.reexports.push({ exported: '*', imported: '*', file: target });
+          else if (ts.isNamedExports(st.exportClause)) for (const el of st.exportClause.elements) mod.reexports.push({ exported: el.name.text, imported: (el.propertyName ?? el.name).text, file: target });
+          else if (ts.isNamespaceExport(st.exportClause)) mod.reexports.push({ exported: st.exportClause.name.text, imported: '*', file: target });
+        }
+      } else if (st.exportClause && ts.isNamedExports(st.exportClause)) {
+        // `export { protectedRouter, helper as h }`
+        for (const el of st.exportClause.elements) mod.exports.set(el.name.text, (el.propertyName ?? el.name).text);
+      }
+      continue;
+    }
+    if (isExport && ts.isClassDeclaration(st) && st.name) mod.exports.set(isDefault ? 'default' : st.name.text, st.name.text);
+    else if (isExport && ts.isFunctionDeclaration(st) && st.name) mod.exports.set(isDefault ? 'default' : st.name.text, st.name.text);
     else if (isExport && ts.isVariableStatement(st)) {
       for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) mod.exports.set(d.name.text, d.name.text);
     } else if (ts.isExportAssignment(st) && !st.isExportEquals) recordExportObject(st.expression);
   }
   visitCalls(sf);
 
+  // Fastify plugins defined and registered in this file: apply their prefix and guards.
+  for (const r of mod.routes) {
+    const plugin = r.inFunction ? localPluginPrefix.get(r.inFunction) : undefined;
+    if (!plugin) continue;
+    r.path = joinPaths(plugin.prefix, r.path);
+    r.guards = [...plugin.guards, ...r.guards];
+  }
+  // Koa routers: a router's own prefix, then the prefix and guards of whatever mounted it in this file.
+  const mountedRouters = new Set<string>();
+  for (const r of mod.routes) {
+    if (r.mountLocal) continue;
+    const own = routerPrefix.get(r.app);
+    if (own) r.path = joinPaths(own, r.path);
+  }
+  for (const mt of mountSame) {
+    mountedRouters.add(mt.router);
+    for (const r of mod.routes) {
+      if (r.app !== mt.router || r.mountLocal) continue;
+      r.path = joinPaths(mt.prefix, r.path);
+      r.guards = [...mt.guards, ...r.guards];
+      r.app = mt.onto;
+    }
+  }
+  // A router created in this file and exported (default or named) is a router module.
+  if (!mod.exportsRouter) {
+    for (const v of mod.exports.values()) {
+      if (mod.appIdents.has(v)) {
+        mod.exportsRouter = v;
+        break;
+      }
+    }
+  }
+
   return mod;
+}
+
+function joinPaths(prefix: string, path: string): string {
+  if (!prefix) return path;
+  const p = path === '*' ? '' : path;
+  const s = `${prefix}/${p}`.replace(/\/{2,}/g, '/');
+  return s.length > 1 ? s.replace(/\/$/, '') : s || '/';
 }

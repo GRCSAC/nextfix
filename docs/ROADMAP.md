@@ -51,6 +51,10 @@ followed. Validated live on moment, marked, qs, lodash, express, send, minimist.
 - Container image inventory through a Syft/Grype adapter (external binary, optional).
 - A review page in the dashboard for derived entries (today it is the CLI).
 
+0.5.2 added Fastify (with autoload) and Koa entry points, validated on the official Fastify
+demo and a Koa REST template. Order agreed for what follows: Python, then the team edition,
+then Go.
+
 ## 0.6 — Team edition (separate commercial repo)
 
 - OIDC single sign-on, local accounts fallback.

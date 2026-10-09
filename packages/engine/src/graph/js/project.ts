@@ -1,6 +1,6 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { AUTH_RE, analyzeModule, type CallSite, type FunctionInfo, type ModuleInfo, type RouteReg } from './analyze.ts';
+import { AUTH_RE, analyzeModule, type CallSite, type FunctionInfo, type ImportBinding, type ModuleInfo, type RouteReg } from './analyze.ts';
 import type { EntryPoint } from '../../types.ts';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.next', 'out', '.nextfix']);
@@ -140,7 +140,9 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
       if (!r.mountLocal) continue;
       const b = m.imports.find((i) => i.local === r.mountLocal);
       const child = b?.file ? modules.get(rel(b.file)) : undefined;
-      if (child?.exportsRouter) continue;
+      // A router module (`module.exports = router`) or a plugin module that registers routes
+      // on its parameter (Fastify) is a real mount.
+      if (child?.exportsRouter || (child && child.routes.length > 0)) continue;
       r.mountLocal = undefined;
       const id = child && b ? resolveExport(child, b.member ?? 'default') : undefined;
       if (id) r.handlerIds.push(id);
@@ -162,8 +164,32 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
       mountsByChild.set(child, list);
     }
   }
+  // Fastify autoload: every module under the autoload dir is mounted at its folder path
+  // (`routes/api/tasks/index.ts` → /api/tasks, `routes/home.ts` → /home); `autohooks` files
+  // guard their folder and everything below it.
+  for (const m of modules.values()) {
+    for (const al of m.autoload) {
+      const dir = al.dir.replace(/\\/g, '/').replace(/\/$/, '');
+      const hooks = [...modules.values()].filter((c) => c.file.replace(/\\/g, '/').startsWith(dir + '/') && /(^|\/)autohooks\.[cm]?[jt]sx?$/.test(c.file.replace(/\\/g, '/')));
+      for (const c of modules.values()) {
+        const cf = c.file.replace(/\\/g, '/');
+        if (!cf.startsWith(dir + '/') || !c.routes.length) continue;
+        const relPath = cf.slice(dir.length + 1).replace(/\.[cm]?[jt]sx?$/, '');
+        const segments = relPath.split('/');
+        if (segments[segments.length - 1] === 'index') segments.pop();
+        const folder = cf.slice(0, cf.lastIndexOf('/'));
+        const guards = hooks.filter((h) => folder === h.file.replace(/\\/g, '/').replace(/\/[^/]+$/, '') || folder.startsWith(h.file.replace(/\\/g, '/').replace(/\/[^/]+$/, '') + '/')).flatMap((h) => h.hookGuards);
+        const list = mountsByChild.get(c.rel) ?? [];
+        list.push({ prefix: joinPath(al.prefix, '/' + segments.join('/')), guards, parent: m });
+        mountsByChild.set(c.rel, list);
+      }
+    }
+  }
   function chains(m: ModuleInfo, depth = 0): { prefix: string; guards: string[]; mounted: boolean }[] {
-    if (m.isRootApp || depth > 6) return [{ prefix: '', guards: [], mounted: true }];
+    // A module that registers autoload and is not itself mounted by anyone is a root (fastify-cli
+    // apps never call `fastify()` in their own source; test helpers that do are not the app).
+    const isRoot = m.isRootApp || (m.autoload.length > 0 && !mountsByChild.has(m.rel));
+    if (isRoot || depth > 6) return [{ prefix: '', guards: [], mounted: true }];
     const mounts = mountsByChild.get(m.rel);
     if (!mounts?.length) return [{ prefix: '', guards: [], mounted: false }];
     const out: { prefix: string; guards: string[]; mounted: boolean }[] = [];
@@ -206,10 +232,39 @@ export function analyzeProject(rootDir: string, options: ProjectOptions = {}): P
       }
     }
   }
+  /** Follows `export { x as y } from './f'` barrels to the module that really defines `name`. */
+  function throughBarrel(mod: ModuleInfo, name: string, depth = 0): { mod: ModuleInfo; name: string } {
+    if (depth > 4) return { mod, name };
+    if (mod.exports.has(name) || mod.functions.some((f) => f.name === name)) return { mod, name };
+    for (const re of mod.reexports) {
+      const target = modules.get(rel(re.file));
+      if (!target) continue;
+      if (re.exported === name) return throughBarrel(target, re.imported === '*' ? 'default' : re.imported, depth + 1);
+      if (re.exported === '*' && (target.exports.has(name) || target.functions.some((f) => f.name === name))) return { mod: target, name };
+    }
+    return { mod, name };
+  }
   function resolveHandlerRef(ref: string): string | undefined {
-    const [file, name] = ref.split('#');
-    const mod = file ? modules.get(file) : undefined;
-    return mod && name ? resolveExport(mod, name) : undefined;
+    const [file, path] = ref.split('#');
+    const start: ModuleInfo | undefined = file ? modules.get(file) : undefined;
+    if (!start || !path) return undefined;
+    let mod: ModuleInfo = start;
+    const parts = path.split('.');
+    // file#user.getUsers: `user` is an export (possibly re-exported) that names a module or class.
+    while (parts.length > 1) {
+      const head = throughBarrel(mod, parts.shift()!);
+      if (head.mod !== mod) {
+        mod = head.mod;
+        continue;
+      }
+      // `user` is a local binding in this module (e.g. an imported module object)
+      const binding: ImportBinding | undefined = mod.imports.find((i) => i.local === head.name || i.member === head.name);
+      const next: ModuleInfo | undefined = binding?.file ? modules.get(rel(binding.file)) : undefined;
+      if (!next) break;
+      mod = next;
+    }
+    const leaf = throughBarrel(mod, parts[0]!);
+    return resolveExport(leaf.mod, leaf.name) ?? leaf.mod.functions.find((f) => f.name === leaf.name)?.id;
   }
 
   const rootApps = [...modules.values()].filter((m) => m.isRootApp).map((m) => m.rel);

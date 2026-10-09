@@ -1,8 +1,6 @@
 import type { ProjectGraph } from '../graph/js/project.ts';
-import type { CallSite } from '../graph/js/analyze.ts';
+import { REQ_NAMES as REQ, type CallSite } from '../graph/js/analyze.ts';
 import type { CallSiteRef, Component, PathHop, ReachPath, ReachResult, SymbolEntry } from '../types.ts';
-
-const REQ = new Set(['req', 'request']);
 
 function matches(c: CallSite, pkg: string, entry: SymbolEntry): string | undefined {
   const t = c.target;

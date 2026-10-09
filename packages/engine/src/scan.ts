@@ -20,6 +20,8 @@ export interface ScanOptions {
   cachePath?: string;
   /** Derive vulnerable symbols from fix commits for advisories without data (default true). */
   derive?: boolean;
+  /** Stop deriving after this many milliseconds; the rest is picked up on the next scan (default 90 s). */
+  deriveBudgetMs?: number;
   githubToken?: string;
   log?: (msg: string) => void;
 }
@@ -55,10 +57,17 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     if (opts.derive !== false) {
       let derived = 0;
       let skipped = 0;
+      let deferred = 0;
       const token = opts.githubToken ?? process.env.GITHUB_TOKEN;
-      for (const c of inv.components) {
+      const budget = opts.deriveBudgetMs ?? 90_000;
+      const started = Date.now();
+      outer: for (const c of inv.components) {
         for (const a of advisories.get(c.purl) ?? []) {
           if (symbols.lookup([a.id, ...a.aliases], c.name)) continue;
+          if (Date.now() - started > budget) {
+            deferred++;
+            continue;
+          }
           const out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences });
           if (out.entry) {
             if (!out.cached) derived++;
@@ -67,12 +76,12 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
             skipped++;
             if (out.reason?.includes('rate limit')) {
               log(`Symbols: ${out.reason}; stopping derivation for this scan`);
-              break;
+              break outer;
             }
           }
         }
       }
-      log(`Symbols: ${derived} newly derived from fix commits, ${skipped} advisories without usable fix data`);
+      log(`Symbols: ${derived} newly derived from fix commits, ${skipped} advisories without usable fix data${deferred ? `, ${deferred} deferred to the next scan (time budget)` : ''}`);
     }
 
     const findings: Finding[] = [];
