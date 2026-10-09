@@ -68,7 +68,16 @@ then Go.
 - Python: tree-sitter (wasm) parser, Flask / FastAPI / Django entry points, same tiers.
 - Go: wrap `govulncheck` (symbol-level, from the Go vuln DB) and map into tiers.
 
-## 1.0 — Ship
+## 1.0 — Ship (and open the repository)
+
+Decision 2026-10-09: open-core, Apache-2.0, and the repository goes **public at 1.0**, not
+before. The public day is a launch, so 1.0 includes:
+- `SECURITY.md` (private disclosure path), `CONTRIBUTING.md` with a Developer Certificate of
+  Origin, issue and pull-request templates, a code of conduct.
+- The NEXTFIX trademark filed (classes 9 and 42) before the flip.
+- History reviewed once more: no attribution trailers, no internal paths, no secrets.
+- The commercial line drawn in the README: open engine, CLI and dashboards; team edition
+  (SSO, roles, audit, API tokens, support) and the reviewed symbol feed are commercial.
 
 - Single executable per platform (Node SEA or Bun compile) and a Docker image.
 - Installer for Windows like NetVane; `winget` + Chocolatey.
