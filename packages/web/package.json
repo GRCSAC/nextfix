@@ -1,0 +1,23 @@
+{
+  "name": "@nextfix/web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "NextFix dashboards: executive and remediation views.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.0.0"
+  }
+}

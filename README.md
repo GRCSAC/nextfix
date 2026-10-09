@@ -3,19 +3,37 @@
 **Scanners find. NextFix decides.**
 
 NextFix looks at an application and tells you which of its vulnerabilities actually matter,
-in what order, and why. It does not try to find more issues. In a world where AI-assisted
-scanners already find thousands, the job is to work out which ones are **reachable** from
+in what order, and why. It does not try to find more issues. Scanners already find
+thousands; the job is to work out which ones are **reachable** from
 an entry point, **exposed** to an attacker, and **exploited** in the wild, and to hand both
 the executive and the engineer a short list with the evidence attached.
 
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.1.0` (end-to-end spike) · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.2.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## What it does today (spike)
+## Two dashboards, one scan
+
+```bash
+npm install
+npm run serve        # builds the UI and opens http://127.0.0.1:8790
+```
+
+Enter a project folder on the welcome screen. NextFix scans it and keeps the history.
+
+- **Executive:** fix-now and fix-next-cycle counts with change since the last scan, the
+  share of findings set aside with evidence, unauthenticated entry points, the trend across
+  scans, where the findings landed and why, what to fix first, what changed, and exposure.
+- **Remediation:** the queue filtered by decision, reachability and search; each finding
+  opens with the plain-English why, the call path from entry point to vulnerable function
+  (showing where request data enters), the upgrade command, copy-as-ticket, and VEX download.
+
+Both views follow the OS light/dark setting and work at phone width.
+
+## The command line
 
 Point it at a Node.js project with a `package-lock.json`:
 
@@ -88,13 +106,18 @@ The full rules are in [docs/DECISION-MODEL.md](docs/DECISION-MODEL.md).
 
 ## Run it
 
-Requires Node 24+ (the engine runs TypeScript directly, no build step).
+Requires Node 24+ (the engine and server run TypeScript directly; only the UI is bundled).
 
 ```bash
 npm install
-npm run scan:sample          # scans samples/express-shop, writes out/*.json
+npm run serve                # build the dashboards, start the local server, open the browser
+npm run scan:sample          # CLI: scans samples/express-shop, writes out/*.json
 npm test                     # engine tests (no network)
+npm run typecheck            # engine + server + web
 ```
+
+Scan history lives in `~/.nextfix/nextfix.sqlite`; advisory caches in `~/.nextfix/cache.sqlite`.
+`nextfix-server serve --host 0.0.0.0` exposes the dashboards to the LAN (no auth yet; see roadmap).
 
 The demo target `samples/express-shop` is a deliberately old Express app that exercises
 every tier. Its `package-lock.json` is committed; do not update its versions.
@@ -111,11 +134,12 @@ every tier. Its `package-lock.json` is committed; do not update its versions.
 | Docker / compose exposure | ✅ |
 | OpenVEX + JSON report | ✅ |
 | Vulnerable-symbol data | 🟡 curated seed (7 advisories) |
-| Derived symbols from fix commits (automated) | ⬜ |
+| Derived symbols from fix commits (automated, human-reviewed) | ⬜ |
 | Python (Flask / FastAPI / Django) | ⬜ |
 | Go (govulncheck wrapper) | ⬜ |
-| Web UI: executive + remediation dashboards | ⬜ |
-| Server mode: SQLite history, trends, SSO (OIDC), RBAC, audit log, REST API | ⬜ |
+| Web UI: executive + remediation dashboards | ✅ |
+| Server mode: SQLite history, trends, scan diff, JSON API | ✅ |
+| SSO (OIDC), RBAC, audit log, API tokens | ⬜ |
 | Container image inventory (Syft/Grype adapter) | ⬜ |
 | Jira / GitHub Issues export | ⬜ |
 | Packaging: single executable + Docker image | ⬜ |
@@ -124,6 +148,8 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 
 ## Parking lot
 
+- Executive one-page PDF export; scheduled re-scans; e-mail or Slack digest.
+- Jira / GitHub Issues push (copy-as-ticket covers it manually today).
 - Fastify, Koa, NestJS, Hapi entry-point detection.
 - Framework objects beyond Express `res` (e.g. Next.js API routes, serverless handlers).
 - Import of a CycloneDX SBOM instead of a lockfile.

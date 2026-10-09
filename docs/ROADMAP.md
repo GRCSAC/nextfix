@@ -8,26 +8,30 @@ Sequenced so that every step is demoable on its own and the hard, defensible par
 Lockfile → OSV/EPSS/KEV → JS call graph → Express entry points → tiers → SSVC decision →
 table / JSON / OpenVEX. Demo target exercises every tier. Tests cover tiers and entry points.
 
-## 0.2 — Make the evidence wider
+## 0.2 — Two dashboards (done 2026-10-09)
+
+`nextfix-server serve` opens a local browser dashboard (same pattern as NetVane), SQLite
+history per target, scan-over-scan diff.
+
+- **Executive view:** fix-now / fix-next-cycle with deltas, set-aside rate, unauthenticated
+  entry points, trend across scans, decision and reachability breakdowns, what to fix first,
+  since-last-scan diff, exposure.
+- **Remediation view:** queue by decision, reachability and search; per-finding why, call-path
+  diagram, fix command, copy-as-ticket, VEX download.
+- Light/dark, phone width, GRCSAC house fonts.
+
+Still open from this phase: one-page PDF export, remediation velocity (needs resolved-date
+tracking), KEV/EPSS hot list as its own card.
+
+## 0.3 — Make the evidence wider
 
 - **Derived symbols:** given an advisory with a fix commit, diff the commit, list the changed
-  exported functions, store as `derived` entries. automated, with a human review
-  queue. This is what turns `imported-unknown-symbol` into real answers at scale.
+  exported functions, store as `derived` entries, with a human review queue before they
+  count as `confirmed`. This is what turns `imported-unknown-symbol` into real answers at scale.
 - More Express patterns: `router.route('/x').get()`, `app.all`, regex paths, `express.static`.
 - Fastify and Koa entry points (same shape, different method names).
 - Config file `nextfix.config.json`: auth-guard names, ignored paths, entry-point overrides.
 - Container image inventory through a Syft/Grype adapter (external binary, optional).
-
-## 0.3 — Two dashboards (web UI)
-
-Server mode: `nextfix serve` opens a local browser dashboard (same pattern as NetVane),
-SQLite history per target, scan-over-scan diff.
-
-- **Executive view:** exposure trend, Act/Attend counts, remediation velocity, the headline
-  "scanners found N, M matter", KEV/EPSS hot list, exportable one-page PDF.
-- **Remediation view:** queue by decision and score, per-finding path graph, the why, fix
-  with major-bump warning, one-click VEX export, copy-as-ticket.
-- GRCSAC house fonts and the simple/clean/professional UX bar; mobile-symmetric.
 
 ## 0.4 — Enterprise accessibility
 
