@@ -5,6 +5,49 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-10
+
+The team release. Everything ships in this repository under the same licence.
+
+### Added
+- **Accounts and roles.** First run on the local machine creates the administrator; after
+  that every API call needs a session or an API token. Roles admin, analyst and viewer
+  (executives are viewers: they see everything and change nothing). Passwords are scrypt
+  hashes with a per-user salt; sessions are HttpOnly, SameSite cookies hashed at rest (12 h
+  idle, 7 d absolute); five failed logins lock a username for fifteen minutes; the last
+  enabled admin cannot be demoted. `--allow-open` keeps the single-user, no-sign-in mode on
+  loopback only. `nextfix-server user add <name> --role admin` for recovery.
+- **Single sign-on.** OpenID Connect with PKCE, discovery and JWKS verification (RS256 and
+  ES256), presets for Microsoft Entra ID, Google and Okta plus a generic provider, a role
+  claim mapping, allowed e-mail domains, and the redirect URI shown in Settings. Validated
+  end to end against an in-process provider in the tests.
+- **API tokens** (`nfx_…`, hashed at rest, scopes read / scan / tickets, shown once) and an
+  **audit log** of every sign-in, settings change, scan, ticket and exception, without
+  secrets, with a page in Settings.
+- **Exceptions.** Accept the risk, mark a false positive, or record a mitigation, with a
+  reason and an optional expiry; analysts propose, admins approve (an admin's own proposal is
+  approved at once). An approved exception sets the finding aside with "Accepted by <name> on
+  <date>: <reason>" on top, feeds the Overview's new **Decide** panel (pending approvals,
+  exceptions expiring within 30 days, routes to confirm), appears on Evidence under
+  "Accepted by a person", and goes into the VEX export with the right OpenVEX statement
+  (`vulnerable_code_not_present` for a false positive, `inline_mitigations_already_exist`
+  for a mitigation, `affected` with an action statement for accepted risk).
+- **Portfolio.** One row per application with posture, owner, last scan, actionable count,
+  exposed surface, oldest SLA breach, a trend sparkline and pending exceptions; the landing
+  page when more than one application exists. Owner and a scan schedule per application.
+- **Scheduled scans, nightly re-decide and the weekly digest.** A scheduler beside the
+  server scans applications on their schedule, re-decides every application each night with
+  fresh exploit data and records promotions, and sends a digest by e-mail (SMTP with STARTTLS
+  and AUTH, no dependency), Slack (Block Kit) or Teams (Adaptive Card) whose subject is the
+  portfolio verdict; "Send test" and "Preview" in Settings.
+- Settings grew sections: Users & access, Single sign-on, Digest, Audit log; the dashboard
+  gained setup and login pages, a user menu with change-password, and role-aware chrome.
+
+### Changed
+- The licence section says what the decision is: nothing is held back for another edition.
+- Database schema version 7 (users, sessions, tokens, audit, exceptions, owner and schedule,
+  re-decide events, digest log); existing databases migrate in place on first start.
+
 ## [0.9.0] — 2026-10-10
 
 ### Added

@@ -1,18 +1,23 @@
 import { Component as ReactComponent, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
-import { api, type Health, type Integrations, type ListReport, type ScanDiff, type ScanMeta, type ScanReport, type Settings as SettingsValues, type Target, type TicketMap } from './api.ts';
+import { api, setUnauthorizedHandler, type Exception, type Health, type Integrations, type ListReport, type Role, type ScanDiff, type ScanMeta, type ScanReport, type Session, type Settings as SettingsValues, type Target, type TicketMap } from './api.ts';
 import { I, Wordmark } from './components/Icons.tsx';
+import { UserMenu } from './components/UserMenu.tsx';
 import { Overview } from './views/Overview.tsx';
 import { Findings } from './views/Findings.tsx';
 import { Components } from './views/Components.tsx';
 import { Evidence } from './views/Evidence.tsx';
 import { Reports } from './views/Reports.tsx';
 import { Apps } from './views/Apps.tsx';
-import { Settings, applyTheme, readTheme, type Theme } from './views/Settings.tsx';
+import { Portfolio } from './views/Portfolio.tsx';
+import { Settings, applyTheme, readTheme, type SettingsSection, type Theme } from './views/Settings.tsx';
+import { LoginPage, SetupPage } from './views/Auth.tsx';
+import { applyExceptions, latestByFinding, pendingCount } from './exceptions.ts';
 import { dateTime } from './format.ts';
 import './plumbing.css';
+import './team.css';
 
-type Page = 'overview' | 'findings' | 'components' | 'evidence' | 'reports' | 'apps' | 'settings';
-const PAGE_IDS: Page[] = ['overview', 'findings', 'components', 'evidence', 'reports', 'apps', 'settings'];
+type Page = 'overview' | 'findings' | 'components' | 'evidence' | 'reports' | 'apps' | 'settings' | 'portfolio';
+const PAGE_IDS: Page[] = ['overview', 'findings', 'components', 'evidence', 'reports', 'apps', 'settings', 'portfolio'];
 const PAGES: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <I.overview /> },
   { id: 'findings', label: 'Findings', icon: <I.findings /> },
@@ -64,7 +69,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function App() {
   return (
     <ErrorBoundary>
-      <Dashboard />
+      <Shell />
     </ErrorBoundary>
   );
 }
@@ -92,7 +97,54 @@ class ErrorBoundary extends ReactComponent<{ children: ReactNode }, { error: Err
   }
 }
 
-function Dashboard() {
+type Gate = { state: 'loading' } | { state: 'error'; text: string } | { state: 'setup' } | { state: 'login'; session: Session; notice?: string } | { state: 'in'; session: Session };
+
+/**
+ * Decides what the page is: the setup form on first run, the sign-in page when the server
+ * wants a user and there is none, otherwise the dashboard. A 401 from any later call brings
+ * the sign-in page back and remembers the hash so sign-in returns to the same place.
+ */
+function Shell() {
+  const [gate, setGate] = useState<Gate>({ state: 'loading' });
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const returnTo = useRef<string | null>(null);
+  useEffect(() => { applyTheme(theme); try { localStorage.setItem('nextfix.theme', theme); } catch { /* ignore */ } }, [theme]);
+
+  const place = useCallback((s: Session, notice?: string) => {
+    if (s.setupRequired) setGate({ state: 'setup' });
+    else if (s.authMode !== 'none' && !s.user) setGate({ state: 'login', session: s, notice });
+    else setGate({ state: 'in', session: s });
+  }, []);
+
+  useEffect(() => {
+    api.session().then((s) => place(s)).catch((e) => setGate({ state: 'error', text: message(e) }));
+    setUnauthorizedHandler(() => {
+      returnTo.current = location.hash;
+      api.session().then((s) => place(s, 'Your session has ended. Sign in again to continue.')).catch(() => setGate({ state: 'login', session: { setupRequired: false, authMode: 'local' }, notice: 'Your session has ended. Sign in again to continue.' }));
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [place]);
+
+  const signedIn = (s: Session) => {
+    place(s);
+    if (returnTo.current) { location.hash = returnTo.current; returnTo.current = null; }
+  };
+  const signOut = async () => {
+    try { await api.logout(); } catch { /* the session is gone either way */ }
+    returnTo.current = null;
+    api.session().then((s) => place(s)).catch((e) => setGate({ state: 'error', text: message(e) }));
+  };
+
+  if (gate.state === 'loading') return <p className="empty center">Loading…</p>;
+  if (gate.state === 'error') return <div className="hero" role="alert"><h1>Cannot reach the server</h1><p>{gate.text}</p><button type="button" className="btn primary" onClick={() => location.reload()}><I.refresh /> Retry</button></div>;
+  if (gate.state === 'setup') return <SetupPage onDone={signedIn} />;
+  if (gate.state === 'login') return <LoginPage session={gate.session} notice={gate.notice} onDone={signedIn} />;
+  return <Dashboard key={gate.session.user?.id ?? 'local'} session={gate.session} theme={theme} onTheme={setTheme} onSignOut={signOut} />;
+}
+
+function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; theme: Theme; onTheme: (t: Theme) => void; onSignOut: () => void }) {
+  const role: Role = session.authMode === 'none' ? 'admin' : session.user?.role ?? 'viewer';
+  const canScan = role !== 'viewer';
   const [targets, setTargets] = useState<Target[] | null>(null);
   const [targetId, setTargetId] = useState<number | null>(() => {
     try { const v = localStorage.getItem('nextfix.target'); return v ? Number(v) : null; } catch { return null; }
@@ -100,18 +152,17 @@ function Dashboard() {
   const [scans, setScans] = useState<ScanMeta[]>([]);
   const [report, setReport] = useState<ListReport | null>(null);
   const [diff, setDiff] = useState<ScanDiff | undefined>();
+  const [exceptions, setExceptions] = useState<Exception[]>([]);
   const [route, setRoute] = useState<Route>(readHash);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | undefined>();
   const [settings, setSettings] = useState<SettingsValues | undefined>();
-  const [theme, setTheme] = useState<Theme>(readTheme);
   const [now, setNow] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
 
-  useEffect(() => { applyTheme(theme); try { localStorage.setItem('nextfix.theme', theme); } catch { /* ignore */ } }, [theme]);
   useEffect(() => {
     const onHash = () => setRoute(readHash());
     addEventListener('hashchange', onHash);
@@ -140,6 +191,9 @@ function Dashboard() {
   const loadTickets = useCallback(async (id: number) => {
     setTickets(await api.tickets(id).catch(() => ({})));
   }, []);
+  const loadExceptions = useCallback(async (id: number) => {
+    setExceptions(await api.exceptions(id).catch(() => []));
+  }, []);
   const loadIntegrations = useCallback(async () => {
     setIntegrations(await api.integrations().catch(() => ({})));
   }, []);
@@ -154,9 +208,11 @@ function Dashboard() {
     const seq = ++loadSeq.current;
     const current = () => seq === loadSeq.current && !ac.signal.aborted;
     try {
-      const [ticketMap, list] = await Promise.all([api.tickets(id, ac.signal).catch((e) => { if (isAbort(e)) throw e; return {}; }), api.scans(id, ac.signal)]);
+      const soft = <T,>(fallback: T) => (e: unknown) => { if (isAbort(e)) throw e; return fallback; };
+      const [ticketMap, exc, list] = await Promise.all([api.tickets(id, ac.signal).catch(soft({} as TicketMap)), api.exceptions(id, ac.signal).catch(soft([] as Exception[])), api.scans(id, ac.signal)]);
       if (!current()) return;
       setTickets(ticketMap);
+      setExceptions(exc);
       setScans(list);
       const last = list[list.length - 1];
       if (!last) {
@@ -195,6 +251,8 @@ function Dashboard() {
         setTargetId(chosen.id);
         loadTarget(chosen.id).catch((e) => setError(message(e)));
       } else setTargetId(null);
+      // With several applications the portfolio is the front door; a deep link is left alone.
+      if (list.length > 1 && (location.hash === '' || location.hash === '#' || location.hash === '#/')) go('portfolio');
     }).catch((e) => setError(message(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -231,7 +289,7 @@ function Dashboard() {
   const selectTarget = async (id: number) => {
     setTargetId(id);
     setError(null);
-    if (route.page === 'apps' || route.id) go('overview');
+    if (route.page === 'apps' || route.page === 'portfolio' || route.id) go('overview');
     await loadTarget(id).catch((e) => setError(message(e)));
   };
 
@@ -276,6 +334,8 @@ function Dashboard() {
     }
   };
 
+  const updateTarget = (t: Target) => setTargets((list) => (list ?? []).map((x) => (x.id === t.id ? { ...x, ...t } : x)));
+
   const rescan = async () => {
     if (!targetId) return;
     setBusy('Scanning…');
@@ -307,21 +367,26 @@ function Dashboard() {
 
   const current = targets?.find((t) => t.id === targetId);
   const lastScan = scans[scans.length - 1];
-  const viewReport = useMemo(() => (report ? asScanReport(report) : null), [report]);
+  const byFinding = useMemo(() => latestByFinding(exceptions), [exceptions]);
+  // Findings a person set aside leave the work queue everywhere the report is drawn.
+  const { report: viewReport, accepted } = useMemo(() => (report ? applyExceptions(asScanReport(report), byFinding) : { report: null, accepted: new Set<string>() }), [report, byFinding]);
   const firstSeen = useMemo(() => {
     const out: Record<string, string> = {};
     for (const f of report?.findings ?? []) if (f.firstSeenAt) out[f.id] = f.firstSeenAt;
     return out;
   }, [report]);
-  const s = report?.summary;
+  const s = viewReport?.summary;
   const actionable = s ? s.byDecision.Act + s.byDecision.Attend : 0;
-  const showTabs = !!current && !!report;
+  const pending = pendingCount(exceptions);
+  const showTabs = !!current && !!report && route.page !== 'portfolio';
+  const home = (targets?.length ?? 0) > 1 ? hashFor('portfolio') : hashFor('overview');
 
   const scanningName = scanning ? (scanning.targetId === null ? 'on another server' : targets?.find((t) => t.id === scanning.targetId)?.name ?? 'application') : '';
   const scanLabel = busy ?? (scanning ? `Scanning ${scanningName}…` : null);
   const elapsed = scanning ? elapsedLabel(now - Date.parse(scanning.startedAt)) : null;
 
   const railItems: { id: Page; label: string; icon: React.ReactNode }[] = [
+    { id: 'portfolio', label: 'Portfolio', icon: <I.portfolio /> },
     { id: 'apps', label: 'Apps', icon: <I.grid /> },
     { id: 'settings', label: 'Settings', icon: <I.settings /> },
   ];
@@ -330,7 +395,7 @@ function Dashboard() {
     <div className="shell">
       <a className="skip-link" href="#main" onClick={(e) => { e.preventDefault(); mainRef.current?.focus(); }}>Skip to content</a>
       <nav className="rail" aria-label="Sections">
-        <a className="rail-brand" href="#/overview" aria-label="NextFix"><Wordmark size={30} /></a>
+        <a className="rail-brand" href={home} aria-label="NextFix"><Wordmark size={30} /></a>
         {railItems.map((r) => (
           <a key={r.id} className={`rail-item ${route.page === r.id ? 'active' : ''}`} href={hashFor(r.id)}>{r.icon}<span>{r.label}</span></a>
         ))}
@@ -341,21 +406,30 @@ function Dashboard() {
       <div className="main">
         <header className="topbar">
           <div className="topbar-inner">
-            <a className="wordmark" href="#/overview"><Wordmark size={24} /><span>Next<b>Fix</b></span></a>
-            {targets && targets.length > 0 && (
+            <a className="wordmark" href={home}><Wordmark size={24} /><span>Next<b>Fix</b></span></a>
+            {targets && targets.length > 0 && route.page !== 'portfolio' && (
               <select className="target-select" aria-label="Application" value={targetId ?? ''} onChange={(e) => selectTarget(Number(e.target.value))}>
                 {targets.map((t) => <option key={t.id} value={t.id}>{t.name ?? t.dir}</option>)}
               </select>
             )}
             {showTabs && (
               <nav className="tabs" aria-label="Pages">
-                {PAGES.map((p) => <a key={p.id} className={route.page === p.id ? 'active' : ''} href={hashFor(p.id)}>{p.icon}<span>{p.label}</span></a>)}
+                {PAGES.map((p) => <a key={p.id} className={route.page === p.id ? 'active' : ''} href={hashFor(p.id)}>{p.icon}<span>{p.label}</span>{p.id === 'findings' && pending > 0 && <span className="tab-badge" title={`${pending} exception${pending === 1 ? '' : 's'} awaiting approval`}>{pending}<span className="sr-only"> exceptions awaiting approval</span></span>}</a>)}
+                <a className={`mobile-only ${route.page === 'portfolio' ? 'active' : ''}`} href={hashFor('portfolio')}><I.portfolio size={18} /><span>Portfolio</span></a>
+                <a className={`mobile-only ${route.page === 'apps' ? 'active' : ''}`} href={hashFor('apps')}><I.grid size={18} /><span>Apps</span></a>
+                <a className={`mobile-only ${route.page === 'settings' ? 'active' : ''}`} href={hashFor('settings')}><I.settings size={18} /><span>Settings</span></a>
+              </nav>
+            )}
+            {!showTabs && targets && targets.length > 0 && (
+              <nav className="tabs mobile-nav" aria-label="Pages">
+                <a className={`mobile-only ${route.page === 'portfolio' ? 'active' : ''}`} href={hashFor('portfolio')}><I.portfolio size={18} /><span>Portfolio</span></a>
                 <a className={`mobile-only ${route.page === 'apps' ? 'active' : ''}`} href={hashFor('apps')}><I.grid size={18} /><span>Apps</span></a>
                 <a className={`mobile-only ${route.page === 'settings' ? 'active' : ''}`} href={hashFor('settings')}><I.settings size={18} /><span>Settings</span></a>
               </nav>
             )}
             <span className="grow" />
             <span className="version muted small">v{health?.version ?? ''}</span>
+            {session.user && <UserMenu user={session.user} onSignOut={onSignOut} />}
           </div>
         </header>
 
@@ -367,7 +441,7 @@ function Dashboard() {
                 {scanLabel}
                 {scanning && <span className="banner-stage"> · {scanning.stage}{elapsed ? ` · ${elapsed}` : ''}</span>}
               </span>
-              {scanning && scanning.targetId !== null && (
+              {scanning && scanning.targetId !== null && canScan && (
                 <button type="button" className="btn small" onClick={cancelScan} disabled={cancelling}>{cancelling ? 'Cancelling…' : 'Cancel'}</button>
               )}
             </div>
@@ -377,19 +451,21 @@ function Dashboard() {
 
           {targets === null ? (
             <p className="empty">Loading…</p>
+          ) : route.page === 'portfolio' ? (
+            <Portfolio onOpen={(id) => { selectTarget(id); }} />
+          ) : route.page === 'settings' ? (
+            <Settings theme={theme} onTheme={onTheme} health={health} integrations={integrations} onIntegrationsChange={loadIntegrations} settings={settings} onSettingsChange={setSettings} role={role} authMode={session.authMode} me={session.user} section={(route.id as SettingsSection) ?? 'general'} go={go} />
           ) : route.page === 'apps' || !current ? (
             targets.length === 0 && route.page !== 'apps' ? (
-              <Welcome onAdd={addTarget} busy={!!busy} />
+              canScan ? <Welcome onAdd={addTarget} busy={!!busy} /> : <div className="hero"><h1>No applications yet</h1><p>An analyst or administrator adds the first application under Apps; its dashboards appear here.</p></div>
             ) : (
-              <Apps targets={targets} currentId={targetId} busy={!!busy} onSelect={selectTarget} onAdd={addTarget} onRemove={removeTarget} />
+              <Apps targets={targets} currentId={targetId} busy={!!busy} role={role} onSelect={selectTarget} onAdd={addTarget} onRemove={removeTarget} onUpdated={updateTarget} />
             )
-          ) : route.page === 'settings' ? (
-            <Settings theme={theme} onTheme={setTheme} health={health} integrations={integrations} onIntegrationsChange={loadIntegrations} settings={settings} onSettingsChange={setSettings} />
           ) : !report || !viewReport || !lastScan ? (
             <div className="hero">
               <h1>{current.name ?? current.dir}</h1>
               <p>This application has not been scanned yet.</p>
-              <button type="button" className="btn primary" onClick={rescan} disabled={!!busy}><I.refresh /> Run the first scan</button>
+              {canScan ? <button type="button" className="btn primary" onClick={rescan} disabled={!!busy}><I.refresh /> Run the first scan</button> : <p className="hint">Viewers cannot start scans; ask an analyst or administrator.</p>}
             </div>
           ) : (
             <>
@@ -397,20 +473,20 @@ function Dashboard() {
                 <span className="icon-box big"><I.cube /></span>
                 <div className="grow">
                   <div className="app-title"><h1>{report.target.name ?? report.target.dir}</h1><span className="tag ok"><I.check /> Scanned</span></div>
-                  <div className="muted small">Last scan {dateTime(report.generatedAt)} · NextFix v{report.tool.version} · {report.summary.components} components</div>
+                  <div className="muted small">Last scan {dateTime(report.generatedAt)} · NextFix v{report.tool.version} · {report.summary.components} components{current.owner ? ` · owner ${current.owner}` : ''}</div>
                 </div>
                 {s && (
                   <div className="app-summary">
                     <strong>{s.findings} findings across {s.components} components. {actionable} need action.</strong>
-                    <span className="muted"> The rest are unreachable, unused, or not shipped, and each one carries a reason you can hand to an auditor.</span>
+                    <span className="muted"> The rest are unreachable, unused, not shipped{accepted.size ? ', or set aside by a person' : ''}, and each one carries a reason you can hand to an auditor.</span>
                   </div>
                 )}
-                <button type="button" className="btn primary" onClick={rescan} disabled={scanActive}><I.refresh /> {scanActive ? 'Scanning…' : 'Scan again'}</button>
+                {canScan && <button type="button" className="btn primary" onClick={rescan} disabled={scanActive}><I.refresh /> {scanActive ? 'Scanning…' : 'Scan again'}</button>}
               </div>
-              {route.page === 'overview' && <Overview report={viewReport} targetId={current.id} scans={scans} diff={diff} go={go} />}
-              {route.page === 'findings' && <Findings report={viewReport} firstSeen={firstSeen} scanId={lastScan.id} targetId={current.id} selectedId={route.id} query={route.query} tickets={tickets} integrations={integrations} onSelect={(id) => go('findings', id, route.query)} onQuery={setQuery} onTicketsChange={() => loadTickets(current.id)} />}
+              {route.page === 'overview' && <Overview report={viewReport} targetId={current.id} scans={scans} diff={diff} exceptions={exceptions} accepted={accepted} go={go} />}
+              {route.page === 'findings' && <Findings report={viewReport} firstSeen={firstSeen} scanId={lastScan.id} targetId={current.id} selectedId={route.id} query={route.query} tickets={tickets} integrations={integrations} role={role} exceptions={byFinding} accepted={accepted} onSelect={(id) => go('findings', id, route.query)} onQuery={setQuery} onTicketsChange={() => loadTickets(current.id)} onExceptionsChange={() => loadExceptions(current.id)} />}
               {route.page === 'components' && <Components report={viewReport} go={go} />}
-              {route.page === 'evidence' && <Evidence report={viewReport} scanId={lastScan.id} query={route.query} go={go} />}
+              {route.page === 'evidence' && <Evidence report={viewReport} scanId={lastScan.id} query={route.query} exceptions={exceptions} go={go} />}
               {route.page === 'reports' && <Reports report={viewReport} scans={scans} scanId={lastScan.id} />}
             </>
           )}

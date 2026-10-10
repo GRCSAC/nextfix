@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Decision, Finding, FullFinding, Integrations, ReachTier, ScanReport, TicketKind, TicketMap } from '../api.ts';
+import type { Decision, Exception, Finding, FullFinding, Integrations, ReachTier, Role, ScanReport, TicketKind, TicketMap } from '../api.ts';
 import { api } from '../api.ts';
 import { DecisionBadge } from '../components/DecisionBadge.tsx';
+import { ExceptionBox } from '../components/ExceptionBox.tsx';
 import { PathDiagram } from '../components/PathDiagram.tsx';
 import { I } from '../components/Icons.tsx';
 import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, bestPath, entryLabel, fixCommand, severity, shortDate, ticketMarkdown } from '../format.ts';
@@ -17,10 +18,15 @@ interface Props {
   query: Record<string, string>;
   tickets: TicketMap;
   integrations: Integrations;
+  role: Role;
+  /** Newest exception per finding, and the findings whose approved exception took them out of the queue. */
+  exceptions: Record<string, Exception>;
+  accepted: Set<string>;
   onSelect: (id?: string) => void;
   /** Writes filters back to the hash; `replace` for keystrokes so Back skips them. */
   onQuery: (query: Record<string, string>, replace?: boolean) => void;
   onTicketsChange: () => void;
+  onExceptionsChange: () => void;
 }
 
 const KIND_LABEL: Record<TicketKind, string> = { github: 'GitHub issue', jira: 'Jira issue' };
@@ -40,15 +46,16 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-export function Findings({ report, firstSeen, scanId, targetId, selectedId, query, tickets, integrations, onSelect, onQuery, onTicketsChange }: Props) {
+export function Findings({ report, firstSeen, scanId, targetId, selectedId, query, tickets, integrations, role, exceptions, accepted, onSelect, onQuery, onTicketsChange, onExceptionsChange }: Props) {
   const decision: Decision | 'all' = DECISIONS.includes(query.decision as Decision) ? (query.decision as Decision) : 'all';
   const tier: ReachTier | 'all' = TIERS.includes(query.tier as ReachTier) ? (query.tier as ReachTier) : 'all';
   const q = query.q ?? '';
   const setFilter = (patch: Record<string, string>, replace = false) => onQuery({ ...query, ...patch }, replace);
   const [bulk, setBulk] = useState<string | null>(null);
   const phone = useMediaQuery(PHONE);
+  const canTicket = role !== 'viewer';
 
-  const kinds = (['github', 'jira'] as TicketKind[]).filter((k) => integrations[k]);
+  const kinds = canTicket ? (['github', 'jira'] as TicketKind[]).filter((k) => integrations[k]) : [];
   const actionableWithout = (kind: TicketKind) => report.findings.filter((f) => (f.decision === 'Act' || f.decision === 'Attend') && !tickets[f.id]?.some((t) => t.kind === kind));
   const createBulk = async (kind: TicketKind) => {
     const list = actionableWithout(kind);
@@ -107,7 +114,7 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
               return (
                 <li key={f.id}>
                   <button type="button" className="qcard" aria-pressed={selected?.id === f.id} onClick={() => onSelect(f.id)}>
-                    <span className="qcard-top"><DecisionBadge decision={f.decision} short /><span className="qcard-pkg">{f.component.name}<span className="muted">@{f.component.version}</span></span></span>
+                    <span className="qcard-top"><DecisionBadge decision={f.decision} short accepted={accepted.has(f.id)} /><span className="qcard-pkg">{f.component.name}<span className="muted">@{f.component.version}</span></span></span>
                     <span className="qcard-score" aria-label={`Score ${f.score}`}>{f.score}</span>
                     <span className="qcard-adv">{advisoryName(f)}<span className="muted">{f.advisory.summary}</span></span>
                     <span className="qcard-meta">
@@ -133,7 +140,7 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
                   const sev = severity(f);
                   return (
                     <tr key={f.id} className="row" aria-selected={selected?.id === f.id} onClick={() => onSelect(f.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(f.id); } }}>
-                      <td><DecisionBadge decision={f.decision} short /></td>
+                      <td><DecisionBadge decision={f.decision} short accepted={accepted.has(f.id)} />{exceptions[f.id]?.status === 'pending' && <div className="small pending-text">exception pending</div>}</td>
                       <td className="num">{f.score}</td>
                       <td className="pkg">{f.component.name}<span className="muted">@{f.component.version}</span></td>
                       <td>{advisoryName(f)}<div className="muted small">{f.advisory.summary}</div></td>
@@ -150,7 +157,7 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
             </table>
           </div>
         )}
-        {selected && <Detail f={selected} firstSeenAt={firstSeen[selected.id]} scanId={scanId} targetId={targetId} targetName={report.target.name ?? report.target.dir} tickets={tickets[selected.id] ?? []} kinds={kinds} onTicketsChange={onTicketsChange} onClose={() => onSelect(undefined)} />}
+        {selected && <Detail f={selected} firstSeenAt={firstSeen[selected.id]} scanId={scanId} targetId={targetId} targetName={report.target.name ?? report.target.dir} tickets={tickets[selected.id] ?? []} kinds={kinds} role={role} exception={exceptions[selected.id]} accepted={accepted.has(selected.id)} onTicketsChange={onTicketsChange} onExceptionsChange={onExceptionsChange} onClose={() => onSelect(undefined)} />}
       </div>
     </div>
   );
@@ -178,7 +185,11 @@ interface DetailProps {
   targetName: string;
   tickets: { kind: TicketKind; key: string; url: string }[];
   kinds: TicketKind[];
+  role: Role;
+  exception?: Exception;
+  accepted: boolean;
   onTicketsChange: () => void;
+  onExceptionsChange: () => void;
   onClose: () => void;
 }
 
@@ -187,7 +198,7 @@ interface DetailProps {
  * is fetched when it opens. Below 1100 px the panel is a full-height sheet: focus moves to
  * Close, Escape and the backdrop close it, and focus returns to the row afterwards.
  */
-function Detail({ f, firstSeenAt, scanId, targetId, targetName, tickets, kinds, onTicketsChange, onClose }: DetailProps) {
+function Detail({ f, firstSeenAt, scanId, targetId, targetName, tickets, kinds, role, exception, accepted, onTicketsChange, onExceptionsChange, onClose }: DetailProps) {
   const [copied, setCopied] = useState<string | null>(null);
   const [creating, setCreating] = useState<TicketKind | null>(null);
   const [ticketError, setTicketError] = useState<string | null>(null);
@@ -264,7 +275,7 @@ function Detail({ f, firstSeenAt, scanId, targetId, targetName, tickets, kinds, 
       <aside className="card detail" role={sheet ? 'dialog' : undefined} aria-modal={sheet || undefined} aria-label={title}>
         <div className="detail-head">
           <div>
-            <DecisionBadge decision={f.decision} short />
+            <DecisionBadge decision={f.decision} short accepted={accepted} />
             <div className="detail-title">{title}</div>
             <div className="detail-sub">{f.advisory.summary} · <span className={`sev ${sev.cls}`}>{sev.label}</span>{f.advisory.cvssScore !== undefined && ` CVSS ${f.advisory.cvssScore.toFixed(1)}`} · score {f.score}{firstSeenAt && <span className="first-seen"> · first seen {shortDate(firstSeenAt)}</span>}</div>
           </div>
@@ -326,8 +337,10 @@ function Detail({ f, firstSeenAt, scanId, targetId, targetName, tickets, kinds, 
             {copied === 'failed' && <span className="error">Clipboard blocked by the browser.</span>}
             {ticketError && <span className="error">{ticketError}</span>}
           </div>
-          {!kinds.length && <p className="hint">Connect GitHub Issues or Jira under Settings → Integrations to create tickets from here.</p>}
+          {!kinds.length && role !== 'viewer' && <p className="hint">Connect GitHub Issues or Jira under Settings → Integrations to create tickets from here.</p>}
         </section>
+
+        <ExceptionBox findingId={f.id} targetId={targetId} role={role} exception={exception} onChange={onExceptionsChange} />
 
         {full?.advisory.details && (
           <section>

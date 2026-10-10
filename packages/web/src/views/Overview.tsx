@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { ScanDiff, ScanMeta, ScanReport } from '../api.ts';
+import type { Exception, ScanDiff, ScanMeta, ScanReport } from '../api.ts';
 import { TrendChart } from '../components/TrendChart.tsx';
 import { HowItWorks } from '../components/HowItWorks.tsx';
-import { BridgeChart, FunnelChart, LeverageChart, MatrixChart, SurfaceTiles, VerdictCard, WorkQueue } from '../components/Panels.tsx';
+import { BridgeChart, DecidePanel, FunnelChart, LeverageChart, MatrixChart, SurfaceTiles, VerdictCard, WorkQueue } from '../components/Panels.tsx';
 import { I } from '../components/Icons.tsx';
 import { AgeingPanel, RecheckButton } from '../components/Ageing.tsx';
 import { EVIDENCE_TIERS } from '../format.ts';
-import { bridge, funnel, leverageSentence, matrix, ratios, surface, upgrades, verdict } from '../analytics.ts';
+import { bridge, decide, funnel, leverageSentence, matrix, ratios, surface, upgrades, verdict } from '../analytics.ts';
 import '../overview.css';
 
 interface Props {
@@ -14,6 +14,9 @@ interface Props {
   targetId: number;
   scans: ScanMeta[];
   diff?: ScanDiff;
+  exceptions: Exception[];
+  /** Findings a person set aside; they are already counted as Track in `report`. */
+  accepted: Set<string>;
   go: (page: string, id?: string, query?: Record<string, string>) => void;
 }
 
@@ -22,10 +25,11 @@ interface Props {
  * done and how (work queue, fix leverage), where would an attacker get in (surface), and how
  * the decisions follow (matrix). The four decision counts appear once, as the work queue.
  */
-export function Overview({ report, targetId, scans, diff, go }: Props) {
+export function Overview({ report, targetId, scans, diff, exceptions, accepted, go }: Props) {
   const [range, setRange] = useState(6);
   const [howOpen, setHowOpen] = useState(false);
   const v = useMemo(() => verdict(report), [report]);
+  const dec = useMemo(() => decide(exceptions, report), [exceptions, report]);
   const rows = useMemo(() => funnel(report), [report]);
   const rat = useMemo(() => ratios(report), [report]);
   const cells = useMemo(() => matrix(report), [report]);
@@ -60,7 +64,15 @@ export function Overview({ report, targetId, scans, diff, go }: Props) {
       </div>
 
       <section className="card">
-        <div className="card-head"><div><h2>The work queue</h2><p className="sub">Every finding lands in exactly one of these.</p></div></div>
+        <div className="card-head">
+          <div className="with-icon"><span className="icon-box"><I.decide size={22} /></span><div><h2>Decide</h2><p className="sub">What waits on a person: proposals to approve, exceptions about to run out, and routes whose exposure is not confirmed.</p></div></div>
+          {accepted.size > 0 && <button type="button" className="btn small" onClick={() => go('evidence')}>{accepted.size} set aside by a person <I.arrow /></button>}
+        </div>
+        <DecidePanel d={dec} report={report} go={go} />
+      </section>
+
+      <section className="card">
+        <div className="card-head"><div><h2>The work queue</h2><p className="sub">Every finding lands in exactly one of these.{accepted.size > 0 ? ` ${accepted.size} set aside by a person count under Set aside.` : ''}</p></div></div>
         <WorkQueue report={report} prev={diff?.previous?.summary.byDecision} go={go} />
       </section>
 

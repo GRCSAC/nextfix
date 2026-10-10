@@ -1,4 +1,4 @@
-import type { Decision, EntryPoint, Finding, ReachTier, ScanDiff, ScanReport } from './api.ts';
+import type { Decision, EntryPoint, Exception, Finding, ReachTier, ScanDiff, ScanReport } from './api.ts';
 import { DECISIONS, DECISION_META, bestPath, pct } from './format.ts';
 import { compareVersions } from '../../engine/src/vulns/ecosystems.ts';
 
@@ -269,4 +269,26 @@ export function surface(report: ScanReport): SurfaceTile[] {
     return { entry: e, findings: fs, worst: worstOf(fs), userInput };
   });
   return tiles.sort((a, b) => (a.worst ? order(a.worst) : 9) - (b.worst ? order(b.worst) : 9) || b.findings.length - a.findings.length || Number(a.entry.authenticated) - Number(b.entry.authenticated) || a.entry.path.localeCompare(b.entry.path));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Decide: what a person still has to rule on
+
+export interface Decide {
+  /** Proposed exceptions nobody has approved or rejected yet. */
+  pending: Exception[];
+  /** Approved exceptions that run out within 30 days, soonest first. */
+  expiring: Exception[];
+  /** Open routes that reach an actionable finding while the service's network exposure is not confirmed. */
+  routes: SurfaceTile[];
+}
+
+export function decide(exceptions: Exception[], report: ScanReport, now = Date.now()): Decide {
+  const soon = now + 30 * 86_400_000;
+  const pending = exceptions.filter((e) => e.status === 'pending').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const expiring = exceptions
+    .filter((e) => e.status === 'approved' && e.expiresAt && Date.parse(e.expiresAt) > now && Date.parse(e.expiresAt) <= soon)
+    .sort((a, b) => Date.parse(a.expiresAt!) - Date.parse(b.expiresAt!));
+  const routes = report.exposure.network === 'published' ? [] : surface(report).filter((t) => !t.entry.authenticated && t.findings.some((f) => f.decision === 'Act' || f.decision === 'Attend'));
+  return { pending, expiring, routes };
 }

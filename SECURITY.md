@@ -25,6 +25,15 @@ own origin, and only for host names it was started with (`localhost`, `127.0.0.1
 base URLs are restricted to https and the token must be re-entered whenever the tracker host
 changes, so a stored token is never sent anywhere but the host it was entered for.
 
+Accounts: until the first administrator is created the server answers loopback connections
+only; after that every API call needs a session cookie (HttpOnly, SameSite=Lax, Secure over
+https) or an API token. Passwords are stored as scrypt hashes with a per-user salt, sessions
+and API tokens as SHA-256 hashes, and five failed logins lock a username for fifteen minutes.
+Single sign-on uses OpenID Connect with PKCE; ID tokens are verified against the provider's
+published keys. Every sign-in, settings change, scan, ticket and exception is written to the
+audit log without secrets. `--allow-open` turns authentication off for single-user use and is
+accepted only on loopback.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem in NextFix itself.

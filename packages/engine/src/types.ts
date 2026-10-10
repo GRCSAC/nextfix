@@ -189,6 +189,28 @@ export interface Exposure {
 export type Decision = 'Act' | 'Attend' | 'Track*' | 'Track';
 export type Exploitation = 'active' | 'likely' | 'none';
 
+export type ExceptionKind = 'accepted-risk' | 'false-positive' | 'mitigated';
+export type ExceptionStatus = 'pending' | 'approved' | 'rejected' | 'revoked' | 'expired';
+
+/**
+ * A human decision recorded against a finding (the server's exceptions table). Attached to a
+ * finding when a report is served; an approved, unexpired one moves the decision to Track.
+ */
+export interface FindingException {
+  /** The exception's id as the API serves it. */
+  id: string;
+  kind: ExceptionKind;
+  status: ExceptionStatus;
+  reason?: string;
+  /** ISO timestamp after which the exception no longer applies; null or absent for open-ended ones. */
+  expiresAt?: string | null;
+  approvedBy?: string;
+  /** When it was approved (ISO timestamp). */
+  approvedAt?: string;
+  /** The decision the engine gave before the exception replaced it. */
+  originalDecision?: Decision;
+}
+
 export interface Finding {
   id: string;
   component: Component;
@@ -205,6 +227,8 @@ export interface Finding {
   score: number;
   why: string[];
   fix?: string;
+  /** Set by the server when an exception exists for this finding; never written by the engine. */
+  exception?: FindingException;
 }
 
 export interface ScanSummary {

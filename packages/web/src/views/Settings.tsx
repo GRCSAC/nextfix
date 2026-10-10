@@ -1,6 +1,19 @@
 import { useEffect, useState } from 'react';
-import { api, type Health, type Integrations, type Settings as SettingsValues, type TicketKind } from '../api.ts';
+import { api, type AuthMode, type Health, type Integrations, type Role, type Settings as SettingsValues, type TicketKind, type User } from '../api.ts';
 import { I } from '../components/Icons.tsx';
+import { UsersPage } from './Users.tsx';
+import { SsoPage } from './Sso.tsx';
+import { DigestPage } from './Digest.tsx';
+import { AuditPage } from './Audit.tsx';
+
+export type SettingsSection = 'general' | 'users' | 'sso' | 'digest' | 'audit';
+export const SETTINGS_SECTIONS: { id: SettingsSection; label: string; admin: boolean }[] = [
+  { id: 'general', label: 'General', admin: false },
+  { id: 'users', label: 'Users & access', admin: true },
+  { id: 'sso', label: 'Single sign-on', admin: true },
+  { id: 'digest', label: 'Weekly digest', admin: true },
+  { id: 'audit', label: 'Audit log', admin: true },
+];
 
 export type Theme = 'dark' | 'light' | 'system';
 
@@ -28,9 +41,34 @@ interface Props {
   onIntegrationsChange: () => void;
   settings?: SettingsValues;
   onSettingsChange: (s: SettingsValues) => void;
+  role: Role;
+  authMode: AuthMode;
+  me?: User;
+  section: SettingsSection;
+  go: (page: string, id?: string) => void;
 }
 
-export function Settings({ theme, onTheme, health, integrations, onIntegrationsChange, settings, onSettingsChange }: Props) {
+/** Settings is one page with sections in the hash (`#/settings/users`); the admin ones are hidden from other roles. */
+export function Settings({ theme, onTheme, health, integrations, onIntegrationsChange, settings, onSettingsChange, role, authMode, me, section, go }: Props) {
+  const admin = role === 'admin';
+  const sections = SETTINGS_SECTIONS.filter((s) => admin || !s.admin);
+  const current = sections.some((s) => s.id === section) ? section : 'general';
+  return (
+    <div className="stack">
+      <nav className="subnav" aria-label="Settings sections">
+        {sections.map((s) => <a key={s.id} href={s.id === 'general' ? '#/settings' : `#/settings/${s.id}`} className={current === s.id ? 'active' : ''} aria-current={current === s.id ? 'page' : undefined}>{s.label}</a>)}
+      </nav>
+      {current === 'users' && <UsersPage me={me} />}
+      {current === 'sso' && <SsoPage />}
+      {current === 'digest' && <DigestPage />}
+      {current === 'audit' && <AuditPage />}
+      {current === 'general' && <General theme={theme} onTheme={onTheme} health={health} integrations={integrations} onIntegrationsChange={onIntegrationsChange} settings={settings} onSettingsChange={onSettingsChange} role={role} authMode={authMode} go={go} />}
+    </div>
+  );
+}
+
+function General({ theme, onTheme, health, integrations, onIntegrationsChange, settings, onSettingsChange, role, authMode, go }: Omit<Props, 'section' | 'me'>) {
+  const admin = role === 'admin';
   return (
     <div className="stack">
       <section className="card">
@@ -45,7 +83,8 @@ export function Settings({ theme, onTheme, health, integrations, onIntegrationsC
       <section className="card">
         <h2>Integrations</h2>
         <p className="sub">Create tracker issues straight from a finding. Credentials are stored only in this machine's NextFix database.</p>
-        <div className="grid two" style={{ marginTop: 12 }}>
+        {!admin && <p className="hint"><I.lock /> Only an administrator can change integrations; the fields below are read-only for you.</p>}
+        <div className={`grid two ${admin ? '' : 'readonly'}`} style={{ marginTop: 12 }}>
           <IntegrationForm
             kind="github"
             title="GitHub Issues"
@@ -76,7 +115,8 @@ export function Settings({ theme, onTheme, health, integrations, onIntegrationsC
       <section className="card">
         <h2>Scan history</h2>
         <p className="sub">How long a finding may stay open before it counts as past its SLA, and how many scans are kept per application.</p>
-        <HistoryForm settings={settings} onSaved={onSettingsChange} />
+        {!admin && <p className="hint"><I.lock /> Only an administrator can change these.</p>}
+        <div className={admin ? '' : 'readonly'}><HistoryForm settings={settings} onSaved={onSettingsChange} /></div>
       </section>
 
       <section className="card">
@@ -91,8 +131,14 @@ export function Settings({ theme, onTheme, health, integrations, onIntegrationsC
 
       <section className="card">
         <h2>Team access</h2>
-        <p className="sub">Single sign-on, roles and an audit log are on the roadmap. Until then, start the server with <code>--host 0.0.0.0</code> to share the dashboards on a trusted network.</p>
-        <p className="hint"><I.info /> Sharing without authentication exposes scan results and tracker credentials' use to anyone on that network.</p>
+        {authMode === 'none' ? (
+          <>
+            <p className="sub">Sign-in is off on this server: everyone who can reach it has administrator rights. Users, single sign-on, the digest and the audit log can still be set up here.</p>
+            <p className="hint"><I.info /> Sharing without sign-in exposes scan results and the use of tracker credentials to anyone on that network.</p>
+          </>
+        ) : (
+          <p className="sub">{admin ? 'Manage people, roles, API tokens and single sign-on under ' : 'People, roles and single sign-on are managed by an administrator under '}<button type="button" className="link" onClick={() => go('settings', 'users')} disabled={!admin}>Users &amp; access</button>.</p>
+        )}
       </section>
     </div>
   );

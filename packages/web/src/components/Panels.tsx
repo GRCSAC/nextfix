@@ -1,6 +1,7 @@
 import type { Decision, ScanReport } from '../api.ts';
 import { DECISIONS, DECISION_META, advisoryName, dateTime, pct } from '../format.ts';
-import { MATRIX_COLS, MATRIX_ROWS, cellLabel, type Bridge, type FunnelRow, type MatrixCell, type SurfaceTile, type Upgrade, type Verdict } from '../analytics.ts';
+import { MATRIX_COLS, MATRIX_ROWS, cellLabel, type Bridge, type Decide, type FunnelRow, type MatrixCell, type SurfaceTile, type Upgrade, type Verdict } from '../analytics.ts';
+import { KIND_META } from '../exceptions.ts';
 import { I } from './Icons.tsx';
 
 type Go = (page: string, id?: string, query?: Record<string, string>) => void;
@@ -201,6 +202,36 @@ export function WorkQueue({ report, prev, go }: { report: ScanReport; prev?: Rec
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Pending approvals, exceptions about to expire, and routes whose exposure is unconfirmed; each row opens the finding. */
+export function DecidePanel({ d, report, go }: { d: Decide; report: ScanReport; go: Go }) {
+  const name = (id: string) => { const f = report.findings.find((x) => x.id === id); return f ? `${f.component.name} · ${advisoryName(f)}` : id.split('|')[1] ?? id; };
+  const total = d.pending.length + d.expiring.length + d.routes.length;
+  if (!total) return <p className="empty">Nothing waits on a person: no proposals pending, no exceptions expiring in the next 30 days, no routes to confirm.</p>;
+  const days = (iso: string) => Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 86_400_000));
+  return (
+    <div className="decide">
+      {d.pending.length > 0 && (
+        <div className="decide-group">
+          <h3><span className="tri d-attend" aria-hidden="true">●</span> {d.pending.length} awaiting approval</h3>
+          <ul className="plain">{d.pending.map((e) => <li key={e.id}><button type="button" className="link" onClick={() => go('findings', e.findingId)}>{name(e.findingId)}</button> <span className="tag">{KIND_META[e.kind].label}</span> <span className="muted small">by {e.proposedBy}</span></li>)}</ul>
+        </div>
+      )}
+      {d.expiring.length > 0 && (
+        <div className="decide-group">
+          <h3><span className="tri d-aside" aria-hidden="true">○</span> {d.expiring.length} expiring within 30 days</h3>
+          <ul className="plain">{d.expiring.map((e) => <li key={e.id}><button type="button" className="link" onClick={() => go('findings', e.findingId)}>{name(e.findingId)}</button> <span className="tag">{KIND_META[e.kind].label}</span> <span className="muted small">{days(e.expiresAt!)} day{days(e.expiresAt!) === 1 ? '' : 's'} left</span></li>)}</ul>
+        </div>
+      )}
+      {d.routes.length > 0 && (
+        <div className="decide-group">
+          <h3><span className="tri d-act" aria-hidden="true">▲</span> {d.routes.length} route{d.routes.length === 1 ? '' : 's'} to confirm as public</h3>
+          <ul className="plain">{d.routes.map((t) => <li key={`${t.entry.method} ${t.entry.path}`}><button type="button" className="link mono" onClick={() => go('findings', undefined, { q: t.entry.path })}>{t.entry.method} {t.entry.path}</button> <span className="muted small">no login · {t.findings.length} finding{t.findings.length === 1 ? '' : 's'} · network exposure not confirmed</span></li>)}</ul>
+        </div>
+      )}
     </div>
   );
 }

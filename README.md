@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.9.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.10.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -38,9 +38,16 @@ Enter a project folder on the welcome screen. NextFix scans it and keeps the his
   finding opens with the plain-English why, the call path from entry point to vulnerable
   function (showing where request data enters), the upgrade command, copy-as-ticket, and
   VEX download.
-- **Components**, **Evidence** (every set-aside with its VEX justification), **Reports**
-  (exports and scan history), **Apps** and **Settings** (theme, GitHub Issues and Jira
-  integrations for one-click tickets).
+- **Portfolio** (every application on one page: posture, owner, actionable count, exposed
+  surface, oldest SLA breach, trend), **Components**, **Evidence** (every set-aside with its
+  VEX justification, including exceptions a person approved), **Reports** (exports and scan
+  history), **Apps** (owner, scan schedule) and **Settings** (theme, SLA days, GitHub Issues
+  and Jira integrations, users and roles, single sign-on, API tokens, digest, audit log).
+
+The first visit on the machine that runs the server creates the administrator; after that
+everyone signs in (local account or single sign-on) and sees what their role allows:
+viewers read, analysts scan and propose exceptions, admins approve and administer. For a
+single-user laptop, `nextfix-server serve --allow-open` keeps the no-sign-in mode on loopback.
 
 Dark by default, light and match-OS in Settings; works at phone width.
 
@@ -288,7 +295,10 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Server mode: SQLite history, trends, scan diff with reasons, finding history + SLA ageing, progress and cancel, JSON API | ✅ |
 | Executive Overview: posture verdict, evidence funnel, what changed, fix leverage, attack surface, decision matrix, print summary | ✅ |
 | Re-check exploit data without re-scanning (KEV/EPSS re-decide) | ✅ |
-| SSO (OIDC), RBAC, audit log, API tokens | ⬜ |
+| Accounts, roles (admin / analyst / viewer), single sign-on (Entra ID, Google, Okta, generic OIDC), API tokens, audit log | ✅ |
+| Exceptions with approver and expiry, in the VEX export and the Decide panel | ✅ |
+| Portfolio across applications, owner and schedule per application | ✅ |
+| Scheduled scans, nightly re-decide, weekly digest (e-mail, Slack, Teams) | ✅ |
 | Container image inventory (syft binary or container; CycloneDX / SPDX / Grype input; distro ecosystems) | ✅ |
 | Jira / GitHub Issues export (per finding and bulk, links remembered) | ✅ |
 | CI gate (`--fail-on`, exit codes) | ✅ |
@@ -311,10 +321,10 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 
 ## License
 
-NextFix is open-core. Everything in this repository, the engine, the CLI, the server and
-both dashboards, is licensed under the [Apache License 2.0](LICENSE). Team features
-(single sign-on, roles, audit log, API tokens) and the curated vulnerable-symbol feed with
-support are offered commercially by GRCSAC LLC and live outside this repository.
+Everything in this repository, the engine, the CLI, the server, both dashboards and the
+team features (accounts, roles, single sign-on, audit log, API tokens, exceptions, digests),
+is licensed under the [Apache License 2.0](LICENSE). Nothing is held back for a separate
+edition. GRCSAC LLC may offer support and hosted editions; the software stays free.
 "NextFix" and the logo are trademarks of GRCSAC LLC, used as unregistered marks (see
 [NOTICE](NOTICE)).
 

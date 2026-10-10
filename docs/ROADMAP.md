@@ -79,7 +79,7 @@ The repository opens once the five remaining feature-table items are done, in th
      and SLA, phone layout, progress and cancel, contrast and theme fixes, reachability
      performance) — done 2026-10-10
 3. Go via govulncheck, SARIF and CI mode (0.9) — done 2026-10-10
-4. Team features: local accounts, roles, audit log, API tokens, OIDC (0.10)
+4. Team features: local accounts, roles, audit log, API tokens, OIDC, exceptions, portfolio, schedules and digest (0.10) — done 2026-10-10
 5. Packaging: single executable per platform, Docker image, Windows installer (1.0)
 
 Decided 2026-10-10: the name is used as an unregistered mark (NextFix™); a use-based filing
@@ -100,7 +100,7 @@ Known open: no call-path claim is made inside an image; the container route read
 images only (not `dir:` or archive sources); Grype itself is not needed because OSV answers
 for every supported distribution.
 
-## 0.10 — Team features (open, in this repo)
+## 0.10 — Team features (done 2026-10-10, open, in this repo)
 
 - Local accounts with hashed passwords and cookie sessions; first-run admin setup.
 - OIDC single sign-on: generic authorization-code flow with PKCE and discovery, presets for

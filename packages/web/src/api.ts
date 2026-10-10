@@ -11,13 +11,135 @@ export interface ScanMeta {
   summary: ScanSummary;
 }
 
+export interface Schedule { everyHours: number }
+
 export interface Target {
   id: number;
   dir: string;
   name: string | null;
   createdAt: string;
   lastScan?: ScanMeta;
+  owner?: string | null;
+  schedule?: Schedule | null;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Session, users, tokens, single sign-on, audit
+
+export type Role = 'admin' | 'analyst' | 'viewer';
+export type AuthMode = 'none' | 'local' | 'oidc';
+
+export interface User {
+  id: string;
+  username: string;
+  displayName: string;
+  role: Role;
+  disabled?: boolean;
+  createdAt?: string;
+  lastLoginAt?: string;
+}
+
+export interface Session {
+  setupRequired: boolean;
+  authMode: AuthMode;
+  user?: User;
+  oidc?: { providers: { id: string; name: string }[] };
+}
+
+export type TokenScope = 'read' | 'scan' | 'tickets';
+export interface ApiToken {
+  id: string;
+  name: string;
+  scopes: TokenScope[];
+  createdAt: string;
+  lastUsedAt?: string | null;
+  createdBy: string;
+}
+
+export type OidcPreset = 'entra' | 'google' | 'okta' | 'generic';
+export interface OidcProvider {
+  id: string;
+  name: string;
+  preset: OidcPreset;
+  issuer: string;
+  clientId: string;
+  hasSecret: boolean;
+  /** Only sent when changing it; never returned. */
+  clientSecret?: string;
+  scopes?: string;
+  roleClaim?: string;
+  roleMap?: Record<string, Role>;
+  defaultRole: Role;
+  allowedDomains?: string[];
+  redirectUri: string;
+}
+export interface OidcSettings { providers: OidcProvider[] }
+
+export interface AuditRow {
+  id: number;
+  at: string;
+  username: string;
+  action: string;
+  target?: string;
+  detail?: string;
+  ip?: string;
+}
+export interface AuditPage { rows: AuditRow[]; next?: number | null }
+
+// ---------------------------------------------------------------------------------------------
+// Exceptions (a person sets a finding aside; analysts propose, admins approve)
+
+export type ExceptionKind = 'accepted-risk' | 'false-positive' | 'mitigated';
+export type ExceptionStatus = 'pending' | 'approved' | 'rejected' | 'revoked' | 'expired';
+export interface Exception {
+  id: string;
+  findingId: string;
+  kind: ExceptionKind;
+  reason: string;
+  status: ExceptionStatus;
+  proposedBy: string;
+  approvedBy?: string;
+  expiresAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+/** What a finding in GET /api/scans/:id carries once an exception exists for it. */
+export interface FindingException { id: string; kind: ExceptionKind; status: ExceptionStatus; expiresAt?: string | null }
+
+// ---------------------------------------------------------------------------------------------
+// Portfolio
+
+export type Posture = 'Exposed' | 'Attention' | 'Contained' | 'Clean' | 'Never scanned';
+export interface PortfolioTarget {
+  id: number;
+  name: string;
+  dir: string;
+  owner?: string | null;
+  lastScanAt?: string;
+  posture: Posture;
+  byDecision: Record<Decision, number>;
+  exposedSurface: { open: number; total: number };
+  oldestPastSlaDays?: number;
+  /** Actionable findings per scan, oldest first, up to 8. */
+  trend: number[];
+  pendingExceptions: number;
+}
+export interface Portfolio { targets: PortfolioTarget[] }
+
+// ---------------------------------------------------------------------------------------------
+// Weekly digest
+
+export type DigestChannel = 'email' | 'slack' | 'teams';
+export interface DigestSettings {
+  channel: DigestChannel | null;
+  email?: { to: string[]; from: string; smtpHost: string; smtpPort: number; smtpUser: string; hasPassword: boolean; secure: boolean };
+  slack?: { hasWebhook: boolean };
+  teams?: { hasWebhook: boolean };
+  weekday: number;
+  hour: number;
+}
+/** PUT body: the settings plus the secrets only when they change. */
+export type DigestPatch = DigestSettings & { smtpPassword?: string; slackWebhook?: string; teamsWebhook?: string };
 
 /**
  * GET /api/scans/:id returns the report with each finding's advisory trimmed: no `details`,
@@ -26,7 +148,7 @@ export interface Target {
  * is one request away at GET /api/scans/:id/findings/:findingId (`api.finding`).
  */
 export type ListAdvisory = Omit<Advisory, 'details'> & { referenceCount: number };
-export type ListFinding = Omit<Finding, 'advisory'> & { advisory: ListAdvisory; firstSeenAt?: string };
+export type ListFinding = Omit<Finding, 'advisory'> & { advisory: ListAdvisory; firstSeenAt?: string; exception?: FindingException };
 export type ListReport = Omit<ScanReport, 'findings'> & { findings: ListFinding[] };
 /** The complete finding, with the full advisory text and every reference. */
 export type FullFinding = Finding & { firstSeenAt?: string };
@@ -115,15 +237,68 @@ export interface Health {
 /** GET /api/scan/progress: the scan this server is running, with the engine's latest log lines. */
 export interface ScanProgress extends Scanning { targetId: number; lines: string[] }
 
+/** An HTTP failure with its status, so callers can tell a wrong password (401) from a lock-out (429). */
+export class ApiError extends Error {
+  status: number;
+  retryAfter?: number;
+  constructor(status: number, message: string, retryAfter?: number) {
+    super(message);
+    this.status = status;
+    this.retryAfter = retryAfter;
+  }
+}
+
+let onUnauthorized: (() => void) | null = null;
+/** Called once per 401 outside the sign-in calls, so the shell can show the login page and keep the hash to return to. */
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
+}
+
+const AUTH_URLS = ['/api/session', '/api/login', '/api/setup', '/api/logout'];
+
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
   if (res.status === 204) return undefined as T;
   const body = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Error(body?.error ?? `${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    if (res.status === 401 && !AUTH_URLS.includes(url)) onUnauthorized?.();
+    const retry = res.headers.get('retry-after');
+    throw new ApiError(res.status, body?.error ?? `${res.status} ${res.statusText}`, retry ? Number(retry) : undefined);
+  }
   return body as T;
 }
 
 export const api = {
+  // session
+  session: () => call<Session>('/api/session'),
+  setup: (body: { username: string; password: string; displayName: string }) => call<Session>('/api/setup', { method: 'POST', body: JSON.stringify(body) }),
+  login: (body: { username: string; password: string }) => call<Session>('/api/login', { method: 'POST', body: JSON.stringify(body) }),
+  logout: () => call<void>('/api/logout', { method: 'POST' }),
+  oidcStartUrl: (provider: string) => `/api/auth/oidc/${encodeURIComponent(provider)}/start`,
+  // users and tokens (admin)
+  users: () => call<User[]>('/api/users'),
+  createUser: (body: { username: string; password: string; displayName: string; role: Role }) => call<User>('/api/users', { method: 'POST', body: JSON.stringify(body) }),
+  updateUser: (id: string, patch: { role?: Role; disabled?: boolean; displayName?: string }) => call<User>(`/api/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  setPassword: (id: string, body: { password: string; currentPassword?: string }) => call<void>(`/api/users/${encodeURIComponent(id)}/password`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteUser: (id: string) => call<void>(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  tokens: () => call<ApiToken[]>('/api/tokens'),
+  createToken: (body: { name: string; scopes: TokenScope[] }) => call<{ id: string; token: string }>('/api/tokens', { method: 'POST', body: JSON.stringify(body) }),
+  revokeToken: (id: string) => call<void>(`/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  oidcSettings: () => call<OidcSettings>('/api/settings/oidc'),
+  saveOidcSettings: (body: OidcSettings) => call<OidcSettings>('/api/settings/oidc', { method: 'PUT', body: JSON.stringify(body) }),
+  audit: (before?: number | null, limit = 100) => call<AuditPage>(`/api/audit?limit=${limit}${before ? `&before=${before}` : ''}`),
+  // exceptions
+  exceptions: (targetId: number, signal?: AbortSignal) => call<Exception[]>(`/api/targets/${targetId}/exceptions`, { signal }),
+  proposeException: (targetId: number, body: { findingId: string; kind: ExceptionKind; reason: string; expiresAt?: string }) => call<Exception>(`/api/targets/${targetId}/exceptions`, { method: 'POST', body: JSON.stringify(body) }),
+  updateException: (id: string, body: { status: 'approved' | 'rejected' | 'revoked'; reason?: string }) => call<Exception>(`/api/exceptions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  // portfolio and targets
+  portfolio: (signal?: AbortSignal) => call<Portfolio>('/api/portfolio', { signal }),
+  updateTarget: (targetId: number, patch: { owner?: string | null; schedule?: Schedule | null }) => call<Target>(`/api/targets/${targetId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  // digest (admin)
+  digest: () => call<DigestSettings>('/api/settings/digest'),
+  saveDigest: (body: DigestPatch) => call<DigestSettings>('/api/settings/digest', { method: 'PUT', body: JSON.stringify(body) }),
+  testDigest: () => call<{ ok: boolean; message: string }>('/api/digest/test', { method: 'POST' }),
+  previewDigest: () => call<{ subject: string; text: string }>('/api/digest/preview', { method: 'POST' }),
   health: (signal?: AbortSignal) => call<Health>('/api/health', { signal }),
   progress: () => call<ScanProgress | null>('/api/scan/progress'),
   cancelScan: () => call<{ cancelled: boolean }>('/api/scan', { method: 'DELETE' }),

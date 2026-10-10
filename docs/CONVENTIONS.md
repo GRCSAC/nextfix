@@ -12,9 +12,10 @@
   and VEX document. Bump with `node scripts/set-version.mjs X.Y.Z` (syncs the workspaces),
   add a `CHANGELOG.md` entry, tag `vX.Y.Z` on release.
 - **Commits:** plain messages, no attribution or co-author trailers of any kind.
-- **Open-core:** this repo is Apache-2.0 and will be public. Team features (SSO, roles,
-  audit log, API tokens) and the commercial symbol feed go in a separate private repo,
-  never here, not even behind a flag. Nothing in this repo may depend on that repo.
+- **Licensing:** this repo is Apache-2.0 and will be public. Everything ships here, team
+  features included (accounts, roles, SSO, audit log, API tokens, exceptions, digests);
+  nothing is held back for a separate edition and nothing in this repo may depend on code
+  that is not in it.
 - **Brand:** colours, wordmark and tagline come from `docs/BRAND.md`; decision colours are
   validated for colour-vision deficiency and always paired with an icon and a label.
 - **Every build:** update `README.md` feature status + parking lot and `CHANGELOG.md`
