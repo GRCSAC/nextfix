@@ -15,7 +15,8 @@ COPY package.json package-lock.json ./
 COPY packages/engine/package.json packages/engine/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
-RUN npm ci --no-audit --no-fund
+# Scripts skipped: the grammars ship WebAssembly builds and their native bindings are not used.
+RUN npm ci --no-audit --no-fund --ignore-scripts
 COPY . .
 RUN npm run build && node packaging/build-sea.mjs --bundle-only
 
