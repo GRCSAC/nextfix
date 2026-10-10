@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Chocolatey package for NextFix. It downloads the signed installer from the GitHub release
+  rather than embedding it, so there is exactly one binary that is "the NextFix installer" and
+  every channel points at it. Version, URL and checksum are filled from the staged installer by
+  packaging/windows/refresh-manifests.mjs; do not edit the generated copy by hand.
+-->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>nextfix</id>
+    <version>1.0.0</version>
+    <packageSourceUrl>https://github.com/GRCSAC/nextfix/tree/main/packaging/windows/manifests/chocolatey</packageSourceUrl>
+    <owners>GRCSAC</owners>
+
+    <title>NextFix</title>
+    <authors>GRCSAC</authors>
+    <projectUrl>https://nextfix.grcsac.com</projectUrl>
+    <projectSourceUrl>https://github.com/GRCSAC/nextfix</projectSourceUrl>
+    <iconUrl>https://raw.githubusercontent.com/GRCSAC/nextfix/main/packaging/icons/nextfix-256.png</iconUrl>
+    <copyright>Copyright (c) 2026 GRCSAC LLC</copyright>
+    <licenseUrl>https://github.com/GRCSAC/nextfix/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <docsUrl>https://github.com/GRCSAC/nextfix#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/GRCSAC/nextfix/issues</bugTrackerUrl>
+    <releaseNotes>https://github.com/GRCSAC/nextfix/releases/tag/v1.0.0</releaseNotes>
+    <tags>nextfix security vulnerability vulnerability-management sca sbom vex sarif reachability devsecops appsec cve cli</tags>
+
+    <summary>Tells you which of an application's vulnerabilities to fix next, and why. Scanners find. NextFix decides.</summary>
+    <description><![CDATA[
+NextFix looks at an application and tells you which of its vulnerabilities actually matter, in
+what order, and why. Scanners already find thousands of issues; NextFix works out which ones are
+**reachable** from an entry point, **exposed** to an attacker and **exploited** in the wild, and
+hands both the executive and the engineer a short list with the evidence attached.
+
+Point it at a Node.js, Python or Go project, or a container image, from the command line
+(`nextfix scan .`), or start the local dashboards with `nextfix serve`. Reports come out as JSON,
+OpenVEX and SARIF for CI gates and GitHub code scanning. It runs entirely on your own machine or
+server; nothing leaves your network. Apache-2.0.
+
+### Install scope
+
+The installer is **per-user**: it needs no administrator rights, installs into
+`%LOCALAPPDATA%\Programs\NextFix` and adds that folder to the user's PATH. Chocolatey normally
+runs from an elevated shell, so NextFix is installed for **the account running `choco install`**,
+not for every user on the machine.
+
+Scan history, accounts and settings live in `%USERPROFILE%\.nextfix` and are kept on uninstall.
+    ]]></description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
