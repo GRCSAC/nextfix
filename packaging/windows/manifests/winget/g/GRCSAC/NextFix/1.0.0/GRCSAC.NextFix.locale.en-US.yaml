@@ -12,7 +12,7 @@ Author: GRCSAC
 PackageName: NextFix
 PackageUrl: https://nextfix.grcsac.com
 License: Apache-2.0
-LicenseUrl: https://github.com/GRCSAC/nextfix/blob/main/LICENSE
+LicenseUrl: https://raw.githubusercontent.com/GRCSAC/nextfix/v1.0.0/LICENSE
 Copyright: Copyright (c) 2026 GRCSAC LLC
 ShortDescription: Tells you which of an application's vulnerabilities to fix next, and why. Scanners find. NextFix decides.
 Description: |-
