@@ -56,6 +56,8 @@ export function compareVersions(eco: Ecosystem, a: string, b: string): number {
     case 'distro':
       return compareDistroVersion(a, b);
     default:
-      return a === b ? 0 : a < b ? -1 : 1;
+      // Maven, RubyGems, NuGet, Packagist and unknown schemes: digit runs compare numerically
+      // (1.10.0 > 1.9.0), everything else character by character.
+      return compareDistroVersion(a, b);
   }
 }

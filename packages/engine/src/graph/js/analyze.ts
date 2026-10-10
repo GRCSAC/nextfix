@@ -24,14 +24,19 @@ export interface ImportBinding {
   kind: 'package' | 'local';
   specifier: string;
   package?: string;
-  /** Named member imported (or subpath). undefined = whole module / default object. */
+  /**
+   * Named member imported. For a default / whole-module import of a package sub-path this is the
+   * sub-path (`lodash/template` → `template`). undefined = whole module / default object.
+   */
   member?: string;
+  /** Package sub-path the binding comes from (`lodash/fp` → `fp`), when there is one. */
+  sub?: string;
   file?: string;
   line: number;
 }
 
 export type CallTarget =
-  | { kind: 'external'; package: string; symbol: string }
+  | { kind: 'external'; package: string; symbol: string; /** Other names the same call answers to (`fp.map` for `map` imported from `lodash/fp`). */ altSymbols?: string[] }
   | { kind: 'framework'; package: 'express'; receiver: 'Response'; symbol: string }
   | { kind: 'local'; name: string; file?: string }
   | { kind: 'unknown'; text: string };
@@ -67,6 +72,8 @@ export interface FunctionInfo {
   parentId?: string;
   /** Parameters that carry request data by framework convention (Flask/Django/FastAPI handler arguments). */
   inputParams?: string[];
+  /** Local variables and the names they derive from, so closures defined inside can inherit their taint. */
+  locals?: { name: string; roots: string[]; origin?: string }[];
 }
 
 export interface RouteReg {
@@ -115,13 +122,86 @@ export function splitSpecifier(spec: string): { pkg: string; sub?: string } {
   return { pkg: parts[0]!, sub: parts.length > 1 ? parts.slice(1).join('/') : undefined };
 }
 
+const SOURCE_EXTS = ['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs', '.mts', '.cts'];
+const INDEX_EXTS = ['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'];
+
 function resolveLocal(fromFile: string, spec: string): string | undefined {
   const base = resolve(dirname(fromFile), spec);
-  const candidates = [base, `${base}.js`, `${base}.ts`, `${base}.mjs`, `${base}.cjs`, `${base}/index.js`, `${base}/index.ts`];
+  const candidates = [base];
+  // NodeNext style: `./x.js` in a TypeScript file names `x.ts` / `x.tsx` (`.mjs` → `.mts`, `.cjs` → `.cts`).
+  const m = /\.(m|c)?jsx?$/i.exec(base);
+  if (m) {
+    const stem = base.slice(0, -m[0].length);
+    candidates.push(`${stem}.${m[1] ?? ''}ts`, `${stem}.tsx`);
+  }
+  for (const ext of SOURCE_EXTS) candidates.push(`${base}${ext}`);
+  for (const ext of INDEX_EXTS) candidates.push(`${base}/index${ext}`);
   for (const c of candidates) {
     if (existsSync(c) && statSync(c).isFile()) return c;
   }
   return undefined;
+}
+
+/** Longest text handed to a guard-name pattern; the patterns can come from the scanned repository. */
+const GUARD_TEXT_LIMIT = 300;
+
+/**
+ * Validates project-supplied guard patterns (nextfix.config.json `authGuards`) and returns them
+ * as one alternation source. A pattern that is too long, does not compile, or nests a quantifier
+ * inside a quantified group (`(a+)+`, `(\w*)*`) is refused by name, so a hostile repository
+ * cannot make the scanner hang.
+ */
+export function compileGuardPatterns(patterns: string[]): string | undefined {
+  const parts: string[] = [];
+  for (const p of patterns) {
+    if (typeof p !== 'string' || !p.trim()) continue;
+    if (p.length > 200) throw new Error(`authGuards pattern is longer than 200 characters: ${JSON.stringify(p.slice(0, 40))}…`);
+    try {
+      new RegExp(p, 'i');
+    } catch (e) {
+      throw new Error(`authGuards pattern ${JSON.stringify(p)} is not a valid regular expression: ${(e as Error).message}`);
+    }
+    if (hasNestedQuantifier(p)) throw new Error(`authGuards pattern ${JSON.stringify(p)} applies a quantifier to a group that already contains one; rewrite it without nested repetition`);
+    parts.push(p);
+  }
+  return parts.length ? parts.join('|') : undefined;
+}
+
+/** True when a quantifier follows a group that itself contains a quantifier (outside character classes). */
+function hasNestedQuantifier(source: string): boolean {
+  const groups: boolean[] = []; // per open group: has a quantifier inside
+  let inClass = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]!;
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (ch === ']') inClass = false;
+      continue;
+    }
+    if (ch === '[') {
+      inClass = true;
+      continue;
+    }
+    if (ch === '(') {
+      groups.push(false);
+      continue;
+    }
+    if (ch === ')') {
+      const inner = groups.pop() ?? false;
+      const next = source[i + 1];
+      const quantified = next === '*' || next === '+' || next === '?' || (next === '{' && /^\{\d+(,\d*)?\}/.test(source.slice(i + 1)));
+      if (inner && quantified) return true;
+      if (inner && groups.length) groups[groups.length - 1] = true;
+      continue;
+    }
+    if (ch === '*' || ch === '+' || ch === '?' || (ch === '{' && /^\{\d+(,\d*)?\}/.test(source.slice(i)))) {
+      if (groups.length) groups[groups.length - 1] = true;
+    }
+  }
+  return false;
 }
 
 function scriptKind(file: string): ts.ScriptKind {
@@ -144,12 +224,21 @@ function isFunctionLike(n: ts.Node): n is ts.FunctionLikeDeclaration {
   );
 }
 
+/** `require('x')` or dynamic `import('x')` with a literal specifier. */
+function moduleLoadSpec(n: ts.Node): string | undefined {
+  if (!ts.isCallExpression(n)) return undefined;
+  const callee = n.expression;
+  const isLoad = (ts.isIdentifier(callee) && callee.text === 'require') || callee.kind === ts.SyntaxKind.ImportKeyword;
+  if (!isLoad) return undefined;
+  const a = n.arguments[0];
+  return a && ts.isStringLiteralLike(a) ? a.text : undefined;
+}
+
 function requireSpec(init: ts.Expression | undefined): { spec: string; member?: string } | undefined {
   if (!init) return undefined;
-  if (ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === 'require') {
-    const a = init.arguments[0];
-    if (a && ts.isStringLiteralLike(a)) return { spec: a.text };
-  }
+  if (ts.isAwaitExpression(init) || ts.isParenthesizedExpression(init)) return requireSpec(init.expression);
+  const spec = moduleLoadSpec(init);
+  if (spec) return { spec };
   if (ts.isPropertyAccessExpression(init)) {
     const inner = requireSpec(init.expression);
     if (inner && !inner.member) return { spec: inner.spec, member: init.name.text };
@@ -163,9 +252,15 @@ export interface AnalyzeOptions {
 
 export function analyzeModule(file: string, rootDir: string, options: AnalyzeOptions = {}): ModuleInfo {
   const AUTH = options.authRe ?? AUTH_RE;
-  const isGuard = (t: string) => !NON_GUARD_RE.test(t) && !NOT_GUARD_RE.test(t) && AUTH.test(t);
-  /** An inline hook/middleware whose body rejects requests (401/403, unauthorized, throw) is a guard. */
-  const GUARD_BODY_RE = /unauthorized|forbidden|\b40[13]\b|\.status\(\s*40[13]|\.code\(\s*40[13]|ctx\.throw\(|\bthrow\b/i;
+  const isGuard = (text: string) => {
+    const t = text.slice(0, GUARD_TEXT_LIMIT);
+    return !NON_GUARD_RE.test(t) && !NOT_GUARD_RE.test(t) && AUTH.test(t);
+  };
+  /**
+   * An inline hook/middleware whose body rejects requests is a guard. A 401/403 status,
+   * `unauthorized` or `forbidden` is required: a bare `throw` is just as often validation.
+   */
+  const GUARD_BODY_RE = /unauthorized|forbidden|\b40[13]\b|\.status\(\s*40[13]|\.code\(\s*40[13]|ctx\.throw\(\s*40[13]/i;
   const isGuardNode = (a: ts.Node) => {
     const text = a.getText(sf).replace(/\s+/g, ' ');
     if (isGuard(text.slice(0, 80))) return true;
@@ -196,47 +291,93 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     hookGuards: [],
   };
   const importsByLocal = new Map<string, ImportBinding>();
+  /** `const x = require('pkg')` inside a function: visible in that function and its closures. */
+  const scopedImports = new Map<ts.Node, Map<string, ImportBinding>>();
 
-  function addImport(local: string, spec: string, member: string | undefined, line: number) {
+  function addImport(local: string, spec: string, member: string | undefined, line: number, scope?: ts.Node) {
     let b: ImportBinding;
     if (spec.startsWith('.') || spec.startsWith('/')) {
       b = { local, kind: 'local', specifier: spec, member, file: resolveLocal(file, spec), line };
     } else {
       const { pkg, sub } = splitSpecifier(spec.startsWith('node:') ? spec.slice(5) : spec);
-      b = { local, kind: 'package', specifier: spec, package: pkg, member: member ?? sub, line };
+      // `import template from 'lodash/template'` / `require('lodash/fp')`: the sub-path names what
+      // was imported; a named import from a sub-path keeps its own name and remembers the sub-path.
+      const whole = member === undefined || member === 'default';
+      b = { local, kind: 'package', specifier: spec, package: pkg, member: whole ? sub ?? member : member, sub, line };
     }
     mod.imports.push(b);
-    importsByLocal.set(local, b);
+    if (scope) (scopedImports.get(scope) ?? scopedImports.set(scope, new Map()).get(scope)!).set(local, b);
+    else importsByLocal.set(local, b);
+  }
+  /** The import binding `name` refers to at `from`: a function-scoped require first, then the module's. */
+  function importAt(name: string, from: ts.Node | undefined): ImportBinding | undefined {
+    let cur: ts.Node | undefined = from;
+    while (cur) {
+      if (isFunctionLike(cur)) {
+        const b = scopedImports.get(cur)?.get(name);
+        if (b) return b;
+      }
+      cur = cur.parent;
+    }
+    return importsByLocal.get(name);
+  }
+  function enclosingFnNode(n: ts.Node): ts.Node | undefined {
+    let cur: ts.Node | undefined = n.parent;
+    while (cur && !isFunctionLike(cur)) cur = cur.parent;
+    return cur;
+  }
+  /** A require()/import() call that is the (possibly awaited, member-accessed) initializer of a declaration. */
+  function isBoundLoad(call: ts.Node): boolean {
+    let cur: ts.Node = call;
+    while (cur.parent && (ts.isPropertyAccessExpression(cur.parent) || ts.isAwaitExpression(cur.parent) || ts.isParenthesizedExpression(cur.parent))) cur = cur.parent;
+    return !!cur.parent && ts.isVariableDeclaration(cur.parent) && cur.parent.initializer === cur;
   }
 
-  // ---- pass 0: imports (top level only) ----
-  for (const st of sf.statements) {
-    if (ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)) {
-      const spec = st.moduleSpecifier.text;
-      const ic = st.importClause;
-      const { line } = pos(st);
-      if (!ic) continue;
-      if (ic.name) addImport(ic.name.text, spec, 'default', line);
-      if (ic.namedBindings) {
-        if (ts.isNamespaceImport(ic.namedBindings)) addImport(ic.namedBindings.name.text, spec, undefined, line);
-        else for (const el of ic.namedBindings.elements) addImport(el.name.text, spec, (el.propertyName ?? el.name).text, line);
+  // ---- pass 0: imports. Top-level bindings are file-wide; `require()` / `import()` bindings inside
+  // a function are scoped to it. Any require('pkg') / import('pkg') counts as importing the package. ----
+  const visitImports = (n: ts.Node) => {
+    if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) {
+      const spec = n.moduleSpecifier.text;
+      const ic = n.importClause;
+      const { line } = pos(n);
+      if (!ic) addImport(`<load:${spec}@${line}>`, spec, undefined, line);
+      else {
+        if (ic.name) addImport(ic.name.text, spec, 'default', line);
+        if (ic.namedBindings) {
+          if (ts.isNamespaceImport(ic.namedBindings)) addImport(ic.namedBindings.name.text, spec, undefined, line);
+          else for (const el of ic.namedBindings.elements) addImport(el.name.text, spec, (el.propertyName ?? el.name).text, line);
+        }
       }
-    } else if (ts.isVariableStatement(st)) {
-      for (const d of st.declarationList.declarations) {
-        const req = requireSpec(d.initializer);
-        if (!req) continue;
-        const { line } = pos(d);
-        if (ts.isIdentifier(d.name)) addImport(d.name.text, req.spec, req.member, line);
-        else if (ts.isObjectBindingPattern(d.name)) {
-          for (const el of d.name.elements) {
+      return;
+    }
+    if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && ts.isStringLiteralLike(n.moduleReference.expression)) {
+      addImport(n.name.text, n.moduleReference.expression.text, undefined, pos(n).line);
+      return;
+    }
+    if (ts.isVariableDeclaration(n)) {
+      const req = requireSpec(n.initializer);
+      if (req) {
+        const { line } = pos(n);
+        const scope = enclosingFnNode(n);
+        if (ts.isIdentifier(n.name)) addImport(n.name.text, req.spec, req.member, line, scope);
+        else if (ts.isObjectBindingPattern(n.name)) {
+          for (const el of n.name.elements) {
             if (!ts.isIdentifier(el.name)) continue;
             const member = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : el.name.text;
-            addImport(el.name.text, req.spec, member, line);
+            addImport(el.name.text, req.spec, member, line, scope);
           }
         }
       }
+    } else {
+      const spec = moduleLoadSpec(n);
+      if (spec && !isBoundLoad(n)) {
+        const { line } = pos(n);
+        addImport(`<load:${spec}@${line}>`, spec, undefined, line, enclosingFnNode(n));
+      }
     }
-  }
+    ts.forEachChild(n, visitImports);
+  };
+  visitImports(sf);
 
   // ---- pass 1: app/router identifiers (Express, Fastify, Koa), and `const x = new Y()` instances of imported classes ----
   const instanceOf = new Map<string, ImportBinding>();
@@ -387,10 +528,13 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     if (fnNode && isFunctionLike(fnNode)) for (const p of fnNode.parameters) if (ts.isIdentifier(p.name)) params.add(p.name.text);
     const raw = new Map<string, Set<string>>(); // local -> direct base identifiers of its initializer
     const origins = new Map<string, string>();
-    const bind = (name: ts.BindingName, init: ts.Node | undefined) => {
+    /** Names declared in this scope; a self-assignment of any other name (`src = src.trim()`) keeps the outer value as a root. */
+    const declared = new Set<string>();
+    const bind = (name: ts.BindingName, init: ts.Node | undefined, keepSelf = false) => {
       if (!init) return;
       const ids = new Set<string>();
       baseIdentifiers(init, ids);
+      if (keepSelf && ts.isIdentifier(name)) ids.add(name.text);
       const fromReq = [...ids].some((i) => REQ_NAMES.has(i));
       const initText = init.getText(sf).replace(/\s+/g, ' ').slice(0, 60);
       const note = (n: string) => {
@@ -407,10 +551,17 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
         }
       }
     };
+    const COMPOUND = new Set([ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken]);
     const walk = (x: ts.Node) => {
       if (x !== scope && isFunctionLike(x)) return;
-      if (ts.isVariableDeclaration(x)) bind(x.name, x.initializer);
-      else if (ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(x.left)) bind(x.left, x.right);
+      if (ts.isVariableDeclaration(x)) {
+        if (ts.isIdentifier(x.name)) declared.add(x.name.text);
+        else for (const el of x.name.elements) if (ts.isBindingElement(el) && ts.isIdentifier(el.name)) declared.add(el.name.text);
+        bind(x.name, x.initializer);
+      } else if (ts.isBinaryExpression(x) && ts.isIdentifier(x.left)) {
+        if (x.operatorToken.kind === ts.SyntaxKind.EqualsToken) bind(x.left, x.right);
+        else if (COMPOUND.has(x.operatorToken.kind)) bind(x.left, x.right, true);
+      }
       ts.forEachChild(x, walk);
     };
     walk(scope);
@@ -424,7 +575,11 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
       seen.add(name);
       const out = new Set<string>();
       for (const d of direct) {
-        if (d === name) continue;
+        if (d === name) {
+          // `src = src.trim()` on a parameter or captured name: the value before the assignment is the root.
+          if (!declared.has(name)) out.add(name);
+          continue;
+        }
         for (const r of resolve(d, depth + 1, seen)) out.add(r);
       }
       locals.set(name, out);
@@ -447,9 +602,9 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     }
     return out;
   }
-  function callArgs(call: ts.CallExpression, fnNode: ts.Node | undefined): CallArg[] {
+  function callArgs(call: ts.CallExpression | ts.NewExpression, fnNode: ts.Node | undefined): CallArg[] {
     const f = flow(fnNode);
-    return call.arguments.map((a) => {
+    return (call.arguments ?? []).map((a) => {
       const ids = new Set<string>();
       baseIdentifiers(a, ids);
       const origin = [...ids].map((i) => f.origins.get(i)).find((o) => o);
@@ -518,21 +673,37 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
 
   const relOf = (abs: string) => relative(rootDir, abs).replace(/\\/g, '/');
 
-  function classifyHandlerArg(a: ts.Expression, route: RouteReg) {
+  /**
+   * One argument of a route registration. `last` marks the final argument: in Express, Koa and
+   * Fastify that is the handler (`app.post('/login', authController.login)`), so it is never only
+   * a guard. A final argument whose name still says guard (`app.put('/x', security.denyAll())`,
+   * `passport.authenticate('github')`) is the handler and keeps the route guarded. Everything
+   * passed to use() is middleware, where the usual guard rules apply.
+   */
+  function classifyHandlerArg(a: ts.Expression, route: RouteReg, last: boolean) {
     if (ts.isArrayLiteralExpression(a)) {
-      a.elements.forEach((e) => classifyHandlerArg(e, route));
+      a.elements.forEach((e, i) => classifyHandlerArg(e, route, last && i === a.elements.length - 1));
       return;
     }
+    const handlerPosition = last && route.method !== 'use';
     if (isFunctionLike(a)) {
+      // Inline middleware that rejects requests (401/403) guards what follows it. The final
+      // argument is the handler even when it can reject; an unscoped use() has no handler of its
+      // own, so a rejecting body there guards every route registered after it.
+      const guardPosition = !last || (route.method === 'use' && route.path === '*');
+      if (guardPosition && isGuardNode(a)) {
+        route.guards.push(describeArg(a));
+        return;
+      }
       const f = fnByNode.get(a);
       if (f) route.handlerIds.push(f.id);
       return;
     }
     if (ts.isIdentifier(a)) {
-      const b = importsByLocal.get(a.text);
+      const b = importAt(a.text, a);
       if (isGuard(a.text)) {
         route.guards.push(a.text);
-        return;
+        if (!handlerPosition) return;
       }
       if (b?.kind === 'local' && route.method === 'use' && !route.mountLocal) {
         // Provisional: project-level analysis confirms the target module exports a router.
@@ -554,16 +725,20 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
       return;
     }
     const text = describeArg(a);
-    if (isGuard(text)) {
+    // In the handler position (`app.post('/login', authController.login)`) the member names what
+    // runs and the receiver only says where it lives, so only the member is tested. Anywhere
+    // else the argument is middleware and the whole text counts (`auth.required`).
+    const guardNamed = ts.isPropertyAccessExpression(a) && ts.isIdentifier(a.expression) && handlerPosition ? isGuard(a.name.text) : isGuard(text);
+    if (guardNamed) {
       route.guards.push(text);
-      return;
+      if (!handlerPosition) return;
     }
     // `controller.method` / `instance.method`: a handler living in another module. When the
     // receiver is a named import (`import { user } from './controller'`), keep the member so a
     // barrel re-export can be followed: file#user.getUsers.
     if (ts.isPropertyAccessExpression(a) && ts.isIdentifier(a.expression)) {
       const recv = a.expression.text;
-      const b = importsByLocal.get(recv) ?? instanceOf.get(recv);
+      const b = importAt(recv, a) ?? instanceOf.get(recv);
       if (b?.kind === 'local' && b.file) {
         const member = b.member && b.member !== 'default' && importsByLocal.has(recv) ? `${b.member}.` : '';
         route.handlerIds.push(`${relOf(b.file)}#${member}${a.name.text}`);
@@ -600,12 +775,12 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
           const r = factoryRef(arg, depth + 1);
           if (r) return r;
         } else if (ts.isPropertyAccessExpression(arg) && ts.isIdentifier(arg.expression)) {
-          const b = importsByLocal.get(arg.expression.text) ?? instanceOf.get(arg.expression.text);
+          const b = importAt(arg.expression.text, arg) ?? instanceOf.get(arg.expression.text);
           if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${arg.name.text}`;
         } else if (ts.isIdentifier(arg)) {
           const f = fnByName.get(arg.text);
           if (f) return f.id;
-          const b = importsByLocal.get(arg.text);
+          const b = importAt(arg.text, arg);
           if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${b.member ?? 'default'}`;
         } else if (isFunctionLike(arg)) {
           const f = fnByNode.get(arg);
@@ -615,15 +790,30 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     }
     const callee = call.expression;
     if (ts.isIdentifier(callee)) {
-      const b = importsByLocal.get(callee.text);
+      const b = importAt(callee.text, call);
       if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${b.member ?? 'default'}`;
       const f = fnByName.get(callee.text);
       if (f) return f.id;
     } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
-      const b = importsByLocal.get(callee.expression.text) ?? instanceOf.get(callee.expression.text);
+      const b = importAt(callee.expression.text, call) ?? instanceOf.get(callee.expression.text);
       if (b?.kind === 'local' && b.file) return `${relOf(b.file)}#${callee.name.text}`;
     }
     return undefined;
+  }
+
+  /** The symbol a call through a package binding reaches, with the other names it answers to. */
+  function externalTarget(b: ImportBinding, member?: string): CallTarget {
+    const named = b.member && b.member !== 'default';
+    if (member === undefined) {
+      // `template()` for `import template from 'lodash/template'` / `parse()` for `import { parse } from 'pkg/lib'`
+      const symbol = b.member ?? 'default';
+      const alt = b.sub && b.member !== b.sub ? [`${b.sub}.${b.member}`] : undefined;
+      return { kind: 'external', package: b.package!, symbol, ...(alt ? { altSymbols: alt } : {}) };
+    }
+    const symbol = named ? `${b.member}.${member}` : member;
+    // `_.map()` for `const _ = require('lodash/fp')` answers to `fp.map` and to `map`.
+    const alt = b.sub ? (b.member === b.sub ? [member] : [`${b.sub}.${b.member}.${member}`]) : undefined;
+    return { kind: 'external', package: b.package!, symbol, ...(alt ? { altSymbols: alt } : {}) };
   }
 
   /** `app.route('/x').get(h).post(h2)`: walks the chain back to route(path) on an app ident. */
@@ -656,7 +846,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
         if (chainPath !== undefined) {
           handled = true;
           const route: RouteReg = { method: callee.name.text, path: chainPath, line, app: 'route', guards: [], middleware: [], handlerIds: [], unresolved: [] };
-          for (const a of n.arguments) classifyHandlerArg(a, route);
+          n.arguments.forEach((a, i) => classifyHandlerArg(a, route, i === n.arguments.length - 1));
           if (route.handlerIds.length || route.unresolved.length) mod.routes.push(route);
         }
       }
@@ -675,7 +865,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
             const key = p.name.text;
             if (key === 'method') route.method = ts.isStringLiteralLike(p.initializer) ? p.initializer.text.toLowerCase() : ts.isArrayLiteralExpression(p.initializer) ? p.initializer.elements.map((e) => (ts.isStringLiteralLike(e) ? e.text.toLowerCase() : '?')).join('|') : 'all';
             else if (key === 'url' || key === 'path') route.path = ts.isStringLiteralLike(p.initializer) ? p.initializer.text : '*';
-            else if (key === 'handler') classifyHandlerArg(p.initializer, route);
+            else if (key === 'handler') classifyHandlerArg(p.initializer, route, true);
             else if (FASTIFY_HOOKS.has(key)) classifyHook(p.initializer, route);
           }
           mod.routes.push(route);
@@ -686,7 +876,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
           const prefix = prefixOf(opts) ?? '';
           const spec = plugin ? requireSpec(plugin)?.spec : undefined;
           if (plugin && ts.isIdentifier(plugin)) {
-            const b = importsByLocal.get(plugin.text);
+            const b = importAt(plugin.text, plugin);
             if (b?.kind === 'package' && b.package === '@fastify/autoload') {
               const dir = autoloadDir(opts);
               if (dir) mod.autoload.push({ dir, prefix: autoloadPrefix(opts) });
@@ -735,7 +925,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
           if (i > 0 && args[i] && ts.isObjectLiteralExpression(args[i]!) && m !== 'use') {
             for (const p of (args[i] as ts.ObjectLiteralExpression).properties) {
               if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) continue;
-              if (p.name.text === 'handler') classifyHandlerArg(p.initializer, route);
+              if (p.name.text === 'handler') classifyHandlerArg(p.initializer, route, true);
               else if (FASTIFY_HOOKS.has(p.name.text)) classifyHook(p.initializer, route);
             }
             i++;
@@ -743,7 +933,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
           // Koa: app.use(router.routes()) / router.use('/p', sub.routes()) mounts a router; that
           // argument is a mount, never a guard or handler.
           const mounted = m === 'use' ? args.map((a) => koaRoutesOf(a)).find((x) => x) : undefined;
-          for (; i < args.length; i++) if (!(m === 'use' && koaRoutesOf(args[i]!))) classifyHandlerArg(args[i]!, route);
+          for (; i < args.length; i++) if (!(m === 'use' && koaRoutesOf(args[i]!))) classifyHandlerArg(args[i]!, route, i === args.length - 1);
           if (m === 'use' && !route.mountLocal) {
             if (mounted) {
               const prefix = route.path === '*' ? '' : route.path;
@@ -773,19 +963,17 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
           // this.method(): a call within the same class / object
           target = { kind: 'local', name: callee.name.text };
         } else if (ts.isIdentifier(callee)) {
-          const b = importsByLocal.get(callee.text);
-          if (b?.kind === 'package') target = { kind: 'external', package: b.package!, symbol: b.member ?? 'default' };
+          const b = importAt(callee.text, n);
+          if (b?.kind === 'package') target = externalTarget(b);
           else if (b?.kind === 'local') target = { kind: 'local', name: b.member ?? 'default', file: b.file };
           else if (callee.text !== 'require') target = { kind: 'local', name: callee.text };
         } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
           const recv = callee.expression.text;
           const m = callee.name.text;
-          const b = importsByLocal.get(recv) ?? instanceOf.get(recv);
-          if (b?.kind === 'package') {
-            const named = b.member && b.member !== 'default';
-            target = { kind: 'external', package: b.package!, symbol: named ? `${b.member}.${m}` : m };
-          } else if (b?.kind === 'local') target = { kind: 'local', name: m, file: b.file };
-          else if (recv === 'this' || fnByName.has(m)) target = { kind: 'local', name: m };
+          const b = importAt(recv, n) ?? instanceOf.get(recv);
+          if (b?.kind === 'package') target = externalTarget(b, m);
+          else if (b?.kind === 'local') target = { kind: 'local', name: m, file: b.file };
+          else if (fnByName.has(m)) target = { kind: 'local', name: m };
           else if (RES_NAMES.has(recv) && hasParam(fnNode, recv)) target = { kind: 'framework', package: 'express', receiver: 'Response', symbol: m };
           else target = { kind: 'unknown', text: `${recv}.${m}` };
         }
@@ -793,6 +981,27 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
           const args = callArgs(n, fnNode);
           fn.calls.push({ line, col, text: callee.getText(sf).replace(/\s+/g, ' ').slice(0, 80), target, userInput: argsUseInput(args), args });
         }
+      }
+    } else if (ts.isNewExpression(n)) {
+      // `new Pkg()` / `new pkg.Cls()`: a constructor is a call site like any other, so a vulnerable
+      // class is visible. Local classes resolve by name like local functions.
+      const { fn, node: fnNode } = enclosing(n);
+      const ctor = n.expression;
+      const { line, col } = pos(n);
+      let target: CallTarget | undefined;
+      if (ts.isIdentifier(ctor)) {
+        const b = importAt(ctor.text, n);
+        if (b?.kind === 'package') target = externalTarget(b);
+        else if (b?.kind === 'local') target = { kind: 'local', name: b.member ?? 'default', file: b.file };
+        else target = { kind: 'local', name: ctor.text };
+      } else if (ts.isPropertyAccessExpression(ctor) && ts.isIdentifier(ctor.expression)) {
+        const b = importAt(ctor.expression.text, n);
+        if (b?.kind === 'package') target = externalTarget(b, ctor.name.text);
+        else if (b?.kind === 'local') target = { kind: 'local', name: ctor.name.text, file: b.file };
+      }
+      if (target) {
+        const args = callArgs(n, fnNode);
+        fn.calls.push({ line, col, text: `new ${ctor.getText(sf).replace(/\s+/g, ' ').slice(0, 76)}`, target, userInput: argsUseInput(args), args });
       }
     }
 
@@ -859,6 +1068,13 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     } else if (ts.isExportAssignment(st) && !st.isExportEquals) recordExportObject(st.expression);
   }
   visitCalls(sf);
+
+  // Each function's request-derived locals, so a closure defined inside it inherits their taint.
+  for (const [node, info] of fnByNode) {
+    const f = flow(node);
+    const locals = [...f.locals].filter(([, roots]) => roots.size).map(([name, roots]) => ({ name, roots: [...roots], ...(f.origins.has(name) ? { origin: f.origins.get(name)! } : {}) }));
+    if (locals.length) info.locals = locals;
+  }
 
   // Fastify plugins defined and registered in this file: apply their prefix and guards.
   for (const r of mod.routes) {

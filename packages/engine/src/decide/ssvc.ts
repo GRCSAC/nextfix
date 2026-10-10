@@ -95,7 +95,8 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
   else why.push('Network exposure unknown (no Dockerfile EXPOSE or compose ports found).');
 
   const epssText = f.epss ? `EPSS ${(f.epss.score * 100).toFixed(2)}% (percentile ${(f.epss.percentile * 100).toFixed(0)})` : 'no EPSS score';
-  why.push(f.kev ? `In CISA KEV since ${f.kev.dateAdded}${f.kev.ransomware ? ', used in ransomware' : ''}; ${epssText}.` : `Not in CISA KEV; ${epssText}.`);
+  const kevName = f.kev?.cve && f.kev.cve !== (a.cve ?? a.id) ? ` (${f.kev.cve}, one of ${(a.cves ?? []).length} CVEs in this advisory)` : '';
+  why.push(f.kev ? `In CISA KEV since ${f.kev.dateAdded}${kevName}${f.kev.ransomware ? ', used in ransomware' : ''}; ${epssText}.` : `Not in CISA KEV; ${epssText}.`);
 
   let fix: string | undefined;
   if (a.fixedVersion) {

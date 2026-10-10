@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { delimiter, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, isAbsolute, join, resolve, sep } from 'node:path';
 import type { Component, Ecosystem, ImageInventory } from '../types.ts';
 import { osvQueryable } from '../vulns/ecosystems.ts';
 import { normalizePyName, purlForPy } from './python.ts';
@@ -80,6 +80,29 @@ export function dockerSyftArgs(ref: string, image = process.env.NEXTFIX_SYFT_IMA
 }
 
 const SAFE_REF = /^[^\s"'`$&|;<>(){}]+$/;
+
+/**
+ * Syft source schemes that read the host's filesystem rather than an image. A reference that
+ * comes from a project's own config file must not be allowed to point syft at the host.
+ */
+const HOST_SCHEMES = /^(dir|file|oci-dir|oci-archive|docker-archive|singularity|snap):/i;
+
+/** Why an image reference taken from a project's config is refused, or undefined when it is fine. */
+export function configImageProblem(ref: string): string | undefined {
+  if (!SAFE_REF.test(ref)) return 'contains characters NextFix will not pass to a process';
+  if (ref.startsWith('-')) return 'looks like a command-line option';
+  if (HOST_SCHEMES.test(ref)) return 'points at the host filesystem rather than an image; pass it on the command line with --image if that is intended';
+  return undefined;
+}
+
+/** Why an SBOM path taken from a project's config is refused, or undefined when it stays inside the project. */
+export function configSbomProblem(rootDir: string, file: string): string | undefined {
+  if (isAbsolute(file)) return 'is an absolute path; config paths must stay inside the project (pass it with --sbom if that is intended)';
+  const abs = resolve(rootDir, file);
+  const root = resolve(rootDir);
+  if (abs !== root && !abs.startsWith(root + sep)) return 'leaves the project folder; config paths must stay inside the project (pass it with --sbom if that is intended)';
+  return undefined;
+}
 
 /** Runs syft through Docker (`docker run anchore/syft …`) and returns its CycloneDX JSON. */
 export function runSyftInDocker(docker: string, ref: string, opts: { timeoutMs?: number } = {}): Promise<string> {

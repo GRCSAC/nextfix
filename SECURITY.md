@@ -13,6 +13,18 @@ Docker CLI with the daemon socket mounted. Either may pull the image from its re
 references are validated before they are passed to a process, and nothing else from the
 scanned project is executed.
 
+A scanned project's own `nextfix.config.json` is treated as untrusted input: `image` values
+that name a host path (`dir:`, `file:`, archive sources) and `sbom` paths outside the project
+folder are ignored with a log line, and guard patterns are length- and shape-checked before
+they are compiled. The same values given on your own command line (`--image`, `--sbom`) are
+honoured as written.
+
+The local server accepts state-changing requests only as `application/json`, only from its
+own origin, and only for host names it was started with (`localhost`, `127.0.0.1`, the
+`--host` value and any `--allow-host`), so a web page you visit cannot drive it. Tracker
+base URLs are restricted to https and the token must be re-entered whenever the tracker host
+changes, so a stored token is never sent anywhere but the host it was entered for.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem in NextFix itself.

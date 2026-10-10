@@ -55,7 +55,7 @@ commit, automated), `package-level` (tiers 1–3 and `image-only`).
    function as an argument counts as a call.
 5. **Across files.** The package's `package.json` is found from the touched file upward and
    an entry file chosen source-first. The import graph is walked breadth-first from the entry
-   (at most 200 files). The changed names are then carried toward the entry: a file's
+   (at most 200 files for npm, 60 for PyPI). The changed names are then carried toward the entry: a file's
    functions that call or reference them (and the classes those methods belong to), the
    file's public names for those, then each importer's local bindings for those names, with
    `export … from` barrels and `module.exports = require()` passing names through unchanged.
@@ -71,9 +71,13 @@ into curated JSON for the repository.
 
 ## 3. Exploitation
 
-- `active` — CVE is in CISA KEV.
-- `likely` — EPSS ≥ 0.10 (10% probability of exploitation in 30 days).
+- `active` — any CVE the advisory covers is in CISA KEV (the why line names it).
+- `likely` — the highest EPSS across the advisory's CVEs is ≥ 0.10 (10% probability of
+  exploitation in 30 days).
 - `none` — otherwise.
+
+An advisory often bundles several CVEs (a GHSA with two aliases, a Debian or Ubuntu notice
+with ten); evidence on any of them counts.
 
 ## 4. Decision
 
@@ -92,6 +96,10 @@ exposure standing in for "mission & well-being".
 Meanings follow SSVC: **Act** = fix now, out of cycle; **Attend** = fix in the next cycle,
 tell the owner; **Track\*** = watch closely, re-check on new exploit data; **Track** = no
 action, re-evaluate on change.
+
+"User input" in the reachable rows is read from the path the decision is made on: an
+unauthenticated path is preferred over an authenticated one even when only the latter
+carries request data. The why lines mention the other path when it exists.
 
 ## 5. Score (0–100, ordering only)
 
@@ -154,7 +162,9 @@ distribution entry lacks them.
   closures defined inside it). No dynamic dispatch, no class hierarchies, no prototype chains.
 - Request data: tracked by name. Inside a function, each argument is reduced to the names it
   derives from (parameters, `req`/`request`, captured identifiers), resolving local variables,
-  destructuring and call results. Along a path, a callee's parameter is tainted when the
+  destructuring and call results. Any identifier named `req`, `request` or `ctx` counts as
+  request data wherever it appears, including one the application built itself; this
+  over-approximates on purpose. Along a path, a callee's parameter is tainted when the
   argument at its position is; a callback or returned closure inherits the tainted names it
   captures. The vulnerable call is "reached by request data" only when one of its own
   arguments traces back. Not tracked: object fields written then read elsewhere, data passed

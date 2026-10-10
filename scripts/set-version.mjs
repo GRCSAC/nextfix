@@ -25,4 +25,14 @@ for (const name of readdirSync(join(root, 'packages'))) {
     changed++;
   }
 }
-console.log(`version ${version}: ${changed} workspace package(s) updated`);
+// The README names the current version in prose; keep it in step.
+const readmePath = join(root, 'README.md');
+if (existsSync(readmePath)) {
+  const readme = readFileSync(readmePath, 'utf8');
+  const updated = readme.replace(/\*\*Current version:\*\* `v[^`]+`/, `**Current version:** \`v${version}\``);
+  if (updated !== readme) {
+    writeFileSync(readmePath, updated);
+    changed++;
+  }
+}
+console.log(`version ${version}: ${changed} file(s) updated`);

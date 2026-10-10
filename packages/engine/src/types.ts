@@ -63,7 +63,9 @@ export interface ImageInventory {
 export interface Advisory {
   id: string;
   aliases: string[];
+  /** The CVE used for display; `cves` lists every CVE the advisory covers. */
   cve?: string;
+  cves?: string[];
   summary: string;
   details: string;
   published?: string;
@@ -194,8 +196,10 @@ export interface Finding {
   symbols?: SymbolEntry;
   reach: ReachResult;
   exposure: Exposure;
-  epss?: { score: number; percentile: number };
-  kev?: { dateAdded: string; ransomware: boolean };
+  /** Highest EPSS across the advisory's CVEs; `cve` names the one it belongs to. */
+  epss?: { score: number; percentile: number; cve?: string };
+  /** Set when any of the advisory's CVEs is in CISA KEV; `cve` names it. */
+  kev?: { dateAdded: string; ransomware: boolean; cve?: string };
   exploitation: Exploitation;
   decision: Decision;
   score: number;

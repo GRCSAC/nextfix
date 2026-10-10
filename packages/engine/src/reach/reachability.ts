@@ -6,6 +6,9 @@ function matches(c: CallSite, pkg: string, entry: SymbolEntry): string | undefin
   const t = c.target;
   if (t.kind === 'external' && t.package === pkg && !entry.receiver) {
     if (entry.symbols.includes(t.symbol)) return t.symbol;
+    // A sub-path import answers to both spellings (`map` and `fp.map` for lodash/fp).
+    const alt = t.altSymbols?.find((s) => entry.symbols.includes(s));
+    if (alt) return alt;
     // Calling the package itself (`marked(src)`) reaches an export named after the package
     // (`export function marked`) or its `default`.
     const base = pkg.replace(/^@[^/]+\//, '');
@@ -139,9 +142,20 @@ function findPath(graph: ProjectGraph, start: string, sitesByFn: Map<string, Sin
             source ??= a.origin ?? a.text;
           });
         }
-      } else {
-        // Containment edge (callback or returned closure): captured names stay tainted.
+      }
+      if (callee?.parentId === st.id || !realised) {
+        // Containment edge (callback or closure defined inside this function): the names it
+        // captures keep their taint, including this function's locals that derive from request
+        // data (`const data = req.body.src; setTimeout(() => use(data))`). A closure that is both
+        // defined here and called by name gets both models.
         for (const t of st.tainted) if (!callee?.params.includes(t)) nextTaint.add(t);
+        const parent = graph.functions.get(st.id);
+        for (const l of parent?.locals ?? []) {
+          if (callee?.params.includes(l.name) || !argIsTainted(l.roots, st.tainted)) continue;
+          nextTaint.add(l.name);
+          carried = true;
+          source ??= l.origin ?? l.name;
+        }
       }
       stack.push({
         id: next,

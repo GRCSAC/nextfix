@@ -129,24 +129,31 @@ function queryKey(c: Component): string {
   return c.ecosystem === 'npm' || c.ecosystem === 'PyPI' ? `osv:query:${c.purl}` : `osv:query:${c.ecosystem}|${c.name}|${c.version}`;
 }
 
-/** The CVE behind an advisory: a CVE alias, or the CVE embedded in a distribution id (`DEBIAN-CVE-2023-5678`). */
-function cveOf(v: OsvVuln): string | undefined {
+/** Every CVE an advisory covers: CVE aliases, or the CVE embedded in a distribution id (`DEBIAN-CVE-2023-5678`). */
+function cvesOf(v: OsvVuln): string[] {
+  const out: string[] = [];
   for (const id of [v.id, ...(v.aliases ?? [])]) {
     const m = /(?:^|-)(CVE-\d{4}-\d{4,})$/.exec(id);
-    if (m) return m[1];
+    if (m && !out.includes(m[1]!)) out.push(m[1]!);
   }
-  return undefined;
+  return out;
+}
+
+function cveOf(v: OsvVuln): string | undefined {
+  return cvesOf(v)[0];
 }
 
 function toAdvisory(v: OsvVuln, c: Component): Advisory {
   const aliases = v.aliases ?? [];
-  const cve = cveOf(v);
+  const cves = cvesOf(v);
+  const cve = cves[0];
   const vec = v.severity?.find((s) => s.type === 'CVSS_V3')?.score ?? v.severity?.[0]?.score;
   const score = vec ? cvss3BaseScore(vec) : undefined;
   return {
     id: v.id,
     aliases,
     cve,
+    cves,
     summary: v.summary ?? '',
     details: v.details ?? '',
     published: v.published,

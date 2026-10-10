@@ -137,7 +137,11 @@ export function djangoPath(p: string): string {
 export async function analyzePyModule(file: string, opts: PyAnalyzeOptions): Promise<PyModuleInfo> {
   const { rootDir } = opts;
   const AUTH = opts.authRe ? new RegExp(`${PY_GUARD_RE.source}|${opts.authRe.source}`, 'i') : PY_GUARD_RE;
-  const isGuard = (t: string) => !PY_NOT_GUARD_RE.test(t) && AUTH.test(t);
+  // Guard patterns can come from the scanned repository, so the text they see is bounded.
+  const isGuard = (text: string) => {
+    const t = text.slice(0, 300);
+    return !PY_NOT_GUARD_RE.test(t) && AUTH.test(t);
+  };
   const text = readFileSync(file, 'utf8');
   const tree = await parsePython(text);
   const root = tree.rootNode;

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { readNpmLock } from './inventory/npm-lock.ts';
 import { hasPythonProject, readPythonDeps } from './inventory/python.ts';
-import { componentKey, detectSbomFiles, readContainerInventory } from './inventory/container.ts';
+import { componentKey, configImageProblem, configSbomProblem, detectSbomFiles, readContainerInventory } from './inventory/container.ts';
 import { analyzePythonProject } from './graph/py/project.ts';
 import { mergeGraphs } from './graph/merge.ts';
 import type { Component } from './types.ts';
@@ -19,7 +19,7 @@ import { toolVersion } from './version.ts';
 import { asList, loadConfig } from './config.ts';
 import { DerivedStore } from './symbols/store.ts';
 import { deriveSymbols } from './symbols/derive.ts';
-import type { Decision, Finding, ImageInventory, ReachResult, ReachTier, ScanReport } from './types.ts';
+import type { Advisory, Decision, Finding, ImageInventory, ReachResult, ReachTier, ScanReport } from './types.ts';
 
 export interface ScanOptions {
   offline?: boolean;
@@ -40,6 +40,23 @@ export interface ScanOptions {
 
 const IMAGE_ONLY: ReachResult = { tier: 'image-only', confidence: 'package-level', importedIn: [], callSites: [], paths: [] };
 
+/**
+ * An advisory can cover several CVEs (a Debian DSA, a GHSA with two CVE aliases). Exploitation
+ * evidence is taken across all of them: KEV on any, and the highest EPSS.
+ */
+function exploitationFor(a: Advisory, epss: Map<string, { score: number; percentile: number }>, kev: Map<string, { dateAdded: string; ransomware: boolean }>): Pick<Finding, 'epss' | 'kev'> {
+  const ids = a.cves?.length ? a.cves : a.cve ? [a.cve] : [];
+  let best: Finding['epss'];
+  let hit: Finding['kev'];
+  for (const cve of ids) {
+    const e = epss.get(cve);
+    if (e && (!best || e.score > best.score)) best = { ...e, cve };
+    const k = kev.get(cve);
+    if (k && !hit) hit = { ...k, cve };
+  }
+  return { epss: best, kev: hit };
+}
+
 const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
 
 export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanReport> {
@@ -50,8 +67,20 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     const config = loadConfig(rootDir);
     const hasNode = existsSync(join(rootDir, 'package-lock.json'));
     const hasPy = hasPythonProject(rootDir);
-    const imageRefs = [...new Set([...asList(config.image), ...(opts.images ?? [])])];
-    const sbomFiles = [...new Set([...asList(config.sbom), ...(opts.sboms ?? []), ...detectSbomFiles(rootDir)])];
+    // Values from the project's own config are treated as untrusted: they cannot point syft at the
+    // host or read files outside the project. The user's command line can.
+    const configImages = asList(config.image).filter((ref) => {
+      const problem = configImageProblem(ref);
+      if (problem) log(`Config: image "${ref}" ignored: ${problem}`);
+      return !problem;
+    });
+    const configSboms = asList(config.sbom).filter((file) => {
+      const problem = configSbomProblem(rootDir, file);
+      if (problem) log(`Config: sbom "${file}" ignored: ${problem}`);
+      return !problem;
+    });
+    const imageRefs = [...new Set([...configImages, ...(opts.images ?? [])])];
+    const sbomFiles = [...new Set([...configSboms, ...(opts.sboms ?? []), ...detectSbomFiles(rootDir)])];
     if (!hasNode && !hasPy && !imageRefs.length && !sbomFiles.length) throw new Error(`No package-lock.json, Python requirements/lockfile, SBOM or container image for ${rootDir}.`);
 
     const components: Component[] = [];
@@ -89,6 +118,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       log(`Inventory: ${added} components from ${ci.images.filter((i) => !i.error).length} image(s)/SBOM(s), ${ci.components.length - added} already in the lockfile`);
     }
     const inv = { components, projectName: projectName ?? basename(rootDir), projectVersion };
+    const lockfileNames = new Set(components.filter((c) => c.origin !== 'image').map((c) => c.name));
 
     log('Code: building call graph and entry points');
     let graph = analyzeProject(rootDir, config);
@@ -103,7 +133,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
 
     log('Advisories: OSV');
     const advisories = await fetchAdvisories(inv.components, { cache, offline: opts.offline, log });
-    const cves = [...advisories.values()].flat().map((a) => a.cve).filter((x): x is string => !!x);
+    const cves = [...new Set([...advisories.values()].flat().flatMap((a) => a.cves ?? (a.cve ? [a.cve] : [])))];
     log(`Advisories: ${[...advisories.values()].flat().length} across ${advisories.size} components; EPSS + KEV for ${cves.length} CVEs`);
     const [epss, kev] = await Promise.all([fetchEpss(cves, cache, opts.offline), fetchKev(cache, opts.offline)]);
 
@@ -132,13 +162,19 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
             deferred++;
             continue;
           }
-          const out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences, ecosystem: c.ecosystem as 'npm' | 'PyPI' });
+          // Derivation is enrichment: a network or GitHub error skips this advisory, never the scan.
+          let out: Awaited<ReturnType<typeof deriveSymbols>>;
+          try {
+            out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences, ecosystem: c.ecosystem as 'npm' | 'PyPI' });
+          } catch (err) {
+            out = { reason: `fetch failed: ${err instanceof Error ? err.message : String(err)}` };
+          }
           if (out.entry) {
             if (!out.cached) derived++;
             symbols.add(out.entry);
           } else {
             skipped++;
-            if (process.env.NEXTFIX_DEBUG) log(`Symbols: ${a.id} ${c.name}: ${out.reason}${out.cached ? ' (cached)' : ''}`);
+            if (process.env.NEXTFIX_DEBUG || out.reason?.startsWith('fetch failed')) log(`Symbols: ${a.id} ${c.name}: ${out.reason}${out.cached ? ' (cached)' : ''}`);
             if (out.reason?.includes('rate limit')) {
               log(`Symbols: ${out.reason}; stopping derivation for this scan`);
               stopped = true;
@@ -156,8 +192,10 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       for (const a of advisories.get(c.purl) ?? []) {
         const sym = symbols.lookup([a.id, ...a.aliases], c.name);
         // A package that exists only in the image is analysed through the code graph only when the
-        // application imports it; OS packages and tooling inside the image get no call-path claim.
-        const codeUsed = (c.ecosystem === 'npm' || c.ecosystem === 'PyPI') && graph.packagesImported.has(c.name);
+        // application imports it and the lockfile has no copy of its own (the app resolves its own
+        // copy, so an image copy at another version is never the one the code runs). OS packages and
+        // tooling inside the image get no call-path claim.
+        const codeUsed = (c.ecosystem === 'npm' || c.ecosystem === 'PyPI') && graph.packagesImported.has(c.name) && !lockfileNames.has(c.name);
         const reach = c.origin === 'image' && !codeUsed ? IMAGE_ONLY : assessReach(graph, c, sym);
         const partial = {
           id: `${c.purl}|${a.id}`,
@@ -166,8 +204,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
           symbols: sym,
           reach,
           exposure,
-          epss: a.cve ? epss.get(a.cve) : undefined,
-          kev: a.cve ? kev.get(a.cve) : undefined,
+          ...exploitationFor(a, epss, kev),
         };
         findings.push({ ...partial, ...decide(partial) });
       }

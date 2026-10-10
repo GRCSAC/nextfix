@@ -10,7 +10,7 @@ import { Cache } from './vulns/cache.ts';
 import { DerivedStore } from './symbols/store.ts';
 import { deriveSymbols } from './symbols/derive.ts';
 import { USER_AGENT } from './version.ts';
-import type { Advisory } from './types.ts';
+import type { Advisory, Decision } from './types.ts';
 
 const HELP = `NextFix ${toolVersion()} — tells you what to fix next, and why.
 
@@ -31,7 +31,10 @@ Options:
   --offline       Use only cached data (~/.nextfix/cache.sqlite).
   --no-derive     Do not fetch fix commits for advisories without function data.
   --why N         Print the full "why" for the top N actionable findings (default 3).
+  --fail-on D     Exit with code 3 when any finding is decided D or worse (Act, Attend, Track*, Track); for CI gates.
   --quiet         No progress output.
+
+Exit codes: 0 ok · 1 error · 2 usage · 3 findings at or above --fail-on.
 
 Set GITHUB_TOKEN to raise GitHub's unauthenticated rate limit when deriving symbols.
 Set NEXTFIX_SYFT to the syft binary when it is not on the PATH.
@@ -50,6 +53,7 @@ async function main() {
       force: { type: 'boolean', default: false },
       pypi: { type: 'boolean', default: false },
       why: { type: 'string', default: '3' },
+      'fail-on': { type: 'string' },
       quiet: { type: 'boolean', default: false },
       version: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -67,7 +71,14 @@ async function main() {
   const dir = rest[0];
   if (values.help || cmd !== 'scan' || !dir) {
     console.log(HELP);
-    process.exitCode = cmd && cmd !== 'scan' ? 2 : 0;
+    // Asking for help is fine; anything else that lands here is a usage error.
+    process.exitCode = values.help ? 0 : 2;
+    return;
+  }
+  const failOn = values['fail-on'] as Decision | undefined;
+  if (failOn !== undefined && !DECISION_ORDER.includes(failOn)) {
+    console.error(`nextfix: --fail-on must be one of ${DECISION_ORDER.join(', ')}`);
+    process.exitCode = 2;
     return;
   }
 
@@ -79,11 +90,22 @@ async function main() {
   console.log(renderSummary(report));
   console.log('');
   console.log(renderTable(report));
-  const n = parseInt(values.why ?? '3', 10);
+  const parsedWhy = parseInt(values.why ?? '3', 10);
+  const n = Number.isNaN(parsedWhy) ? 3 : parsedWhy;
   if (n > 0) console.log(renderWhy(report, n));
   if (values.json) console.log(`\nJSON report: ${resolve(values.json)}`);
   if (values.vex) console.log(`OpenVEX:     ${resolve(values.vex)}`);
+  if (failOn) {
+    const threshold = DECISION_ORDER.indexOf(failOn);
+    const hits = report.findings.filter((f) => DECISION_ORDER.indexOf(f.decision) <= threshold);
+    if (hits.length) {
+      console.log(`\n${hits.length} finding(s) decided ${failOn} or worse; failing as requested (--fail-on ${failOn}).`);
+      process.exitCode = 3;
+    }
+  }
 }
+
+const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
 
 async function symbolsCommand(args: string[], opts: { force: boolean; offline: boolean; pypi: boolean; log?: (m: string) => void }) {
   const [sub, id, pkg] = args;

@@ -2,7 +2,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { analyzePyModule, PY_GUARD_RE, type PyModuleInfo, type PyRoute } from './analyze.ts';
 import type { ProjectGraph } from '../js/project.ts';
-import type { CallSite, FunctionInfo } from '../js/analyze.ts';
+import { compileGuardPatterns, type CallSite, type FunctionInfo } from '../js/analyze.ts';
 import type { EntryPoint } from '../../types.ts';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'venv', '.venv', 'env', '__pycache__', 'site-packages', 'dist', 'build', '.tox', '.mypy_cache', '.pytest_cache', 'migrations', 'tests', 'test', 'docs']);
@@ -36,7 +36,9 @@ export interface PyProjectOptions {
 
 /** Builds a ProjectGraph (same shape as the JavaScript one) for a Python project. */
 export async function analyzePythonProject(rootDir: string, opts: PyProjectOptions): Promise<ProjectGraph> {
-  const authRe = opts.authGuards?.length ? new RegExp(opts.authGuards.join('|'), 'i') : undefined;
+  // The patterns come from the scanned repository's nextfix.config.json: validated before use.
+  const extra = compileGuardPatterns(opts.authGuards ?? []);
+  const authRe = extra ? new RegExp(extra, 'i') : undefined;
   const ignore = new Set((opts.ignore ?? []).map((d) => d.replace(/\\/g, '/').replace(/\/+$/, '')));
   const files = discoverPythonFiles(rootDir).filter((f) => {
     const rel = relative(rootDir, f).replace(/\\/g, '/');

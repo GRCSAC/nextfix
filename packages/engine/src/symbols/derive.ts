@@ -160,6 +160,8 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
     throw err;
   }
 
+  // Offline, a missing diff or file means "not cached", not "no fix data": do not remember it as a failure.
+  if (opts.offline && (!used.length || !symbols.size)) return { reason: 'offline: the fix commit is not in the local cache yet' };
   if (!used.length) return fail(opts, advisory, pkg, `fix links found but no diff could be fetched or it touched no ${ecosystem === 'PyPI' ? 'Python' : 'JavaScript'} source (tests, docs or native code only)`);
   if (!symbols.size && (changed.size || moduleLevel) && defaultCallable) symbols.set('default', moduleLevel && !changed.size ? 'module-level-change' : 'package-is-one-function');
   if (!symbols.size) return fail(opts, advisory, pkg, changed.size ? `fix changed internal function(s) ${[...changed].join(', ')} that no entry-file export reaches` : 'fix touched no function bodies and could not be traced to an entry export');

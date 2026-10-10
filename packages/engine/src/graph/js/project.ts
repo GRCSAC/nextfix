@@ -1,6 +1,6 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { AUTH_RE, analyzeModule, type CallSite, type FunctionInfo, type ImportBinding, type ModuleInfo, type RouteReg } from './analyze.ts';
+import { AUTH_RE, analyzeModule, compileGuardPatterns, type CallSite, type FunctionInfo, type ImportBinding, type ModuleInfo, type RouteReg } from './analyze.ts';
 import type { EntryPoint } from '../../types.ts';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.next', 'out', '.nextfix']);
@@ -55,10 +55,9 @@ export interface ProjectOptions {
 }
 
 export function analyzeProject(rootDir: string, options: ProjectOptions = {}): ProjectGraph {
-  const extra = (options.authGuards ?? []).filter(Boolean);
-  const authRe = extra.length
-    ? new RegExp(options.authGuardsReplace ? extra.join('|') : `${AUTH_RE.source}|${extra.join('|')}`, 'i')
-    : undefined;
+  // The patterns come from the scanned repository's nextfix.config.json: validated before use.
+  const extra = compileGuardPatterns(options.authGuards ?? []);
+  const authRe = extra ? new RegExp(options.authGuardsReplace ? extra : `${AUTH_RE.source}|${extra}`, 'i') : undefined;
   const ignore = new Set((options.ignore ?? []).map((d) => d.replace(/\\/g, '/').replace(/\/+$/, '')));
   const files = discoverSourceFiles(rootDir).filter((f) => {
     const rel = relative(rootDir, f).replace(/\\/g, '/');

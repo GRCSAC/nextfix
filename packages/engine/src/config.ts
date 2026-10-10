@@ -26,10 +26,28 @@ export function asList(v: string | string[] | undefined): string[] {
 export function loadConfig(rootDir: string): ProjectConfig {
   const file = join(rootDir, 'nextfix.config.json');
   if (!existsSync(file)) return {};
+  let cfg: unknown;
   try {
-    const cfg = JSON.parse(readFileSync(file, 'utf8')) as ProjectConfig;
-    return cfg && typeof cfg === 'object' ? cfg : {};
+    cfg = JSON.parse(readFileSync(file, 'utf8'));
   } catch (err) {
     throw new Error(`nextfix.config.json is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
+  return validateConfig(cfg);
+}
+
+const STRING_LIST_KEYS: (keyof ProjectConfig)[] = ['authGuards', 'ignore', 'internalRoutes'];
+const STRING_OR_LIST_KEYS: (keyof ProjectConfig)[] = ['image', 'sbom'];
+
+/** Checks the shape of a config object and reports the first problem in plain words. */
+export function validateConfig(cfg: unknown): ProjectConfig {
+  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('nextfix.config.json must contain a JSON object');
+  const c = cfg as Record<string, unknown>;
+  const isStringList = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === 'string');
+  for (const k of STRING_LIST_KEYS) if (c[k] !== undefined && !isStringList(c[k])) throw new Error(`nextfix.config.json: "${k}" must be a list of strings`);
+  for (const k of STRING_OR_LIST_KEYS) if (c[k] !== undefined && typeof c[k] !== 'string' && !isStringList(c[k])) throw new Error(`nextfix.config.json: "${k}" must be a string or a list of strings`);
+  if (c.authGuardsReplace !== undefined && typeof c.authGuardsReplace !== 'boolean') throw new Error('nextfix.config.json: "authGuardsReplace" must be true or false');
+  if (c.syft !== undefined && typeof c.syft !== 'string') throw new Error('nextfix.config.json: "syft" must be a string');
+  const known = new Set<string>([...STRING_LIST_KEYS, ...STRING_OR_LIST_KEYS, 'authGuardsReplace', 'syft']);
+  for (const k of Object.keys(c)) if (!known.has(k)) throw new Error(`nextfix.config.json: unknown setting "${k}" (known: ${[...known].join(', ')})`);
+  return c as ProjectConfig;
 }

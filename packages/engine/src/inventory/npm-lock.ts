@@ -56,14 +56,16 @@ export function readNpmLock(projectDir: string): NpmInventory {
     const marker = 'node_modules/';
     const idx = key.lastIndexOf(marker);
     if (idx < 0) continue; // workspace link, not a dependency
-    const name = key.slice(idx + marker.length);
+    const installedAs = key.slice(idx + marker.length);
+    // `"foo": "npm:bar@1"` installs bar under the name foo; advisories are published for bar.
+    const name = pkg.name && pkg.name !== installedAs ? pkg.name : installedAs;
     const nested = key.slice(0, idx).includes(marker);
     const purl = purlFor(name, pkg.version);
     const existing = byPurl.get(purl);
     if (existing) {
       existing.dev = existing.dev && !!pkg.dev;
       existing.optional = existing.optional && !!pkg.optional;
-      existing.direct = existing.direct || (!nested && directNames.has(name));
+      existing.direct = existing.direct || (!nested && directNames.has(installedAs));
       existing.paths = [...(existing.paths ?? [existing.path]), key];
       continue;
     }
@@ -74,7 +76,7 @@ export function readNpmLock(projectDir: string): NpmInventory {
       purl,
       dev: !!pkg.dev,
       optional: !!pkg.optional,
-      direct: !nested && directNames.has(name),
+      direct: !nested && directNames.has(installedAs),
       path: key,
     });
   }

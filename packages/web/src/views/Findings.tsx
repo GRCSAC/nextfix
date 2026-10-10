@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Decision, Finding, Integrations, ReachTier, ScanReport, TicketKind, TicketMap } from '../api.ts';
 import { api } from '../api.ts';
 import { DecisionBadge } from '../components/DecisionBadge.tsx';
@@ -112,6 +112,12 @@ export function Findings({ report, scanId, targetId, selectedId, query, tickets,
   );
 }
 
+/** Advisory data is not ours: only http(s) URLs become links, anything else is shown as text. */
+function SafeLink({ href, children }: { href?: string; children: ReactNode }) {
+  if (!href || !/^https?:\/\//i.test(href)) return <span>{children}</span>;
+  return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+}
+
 function shortCommit(url: string): string {
   const m = /\/(?:commit|commits)\/([0-9a-f]{7,40})/i.exec(url);
   if (m) return m[1]!.slice(0, 10);
@@ -186,12 +192,12 @@ function Detail({ f, scanId, targetId, targetName, tickets, kinds, onTicketsChan
           </p>
           {f.symbols.evidence ? (
             <p className="small muted">
-              Derived from the fix commit <a href={f.symbols.evidence.commits[0]} target="_blank" rel="noreferrer">{shortCommit(f.symbols.evidence.commits[0] ?? '')}</a>, which changed <code>{f.symbols.evidence.changedFunctions.join(', ')}</code> in {f.symbols.evidence.files.join(', ')}.
+              Derived from the fix commit <SafeLink href={f.symbols.evidence.commits[0]}>{shortCommit(f.symbols.evidence.commits[0] ?? '')}</SafeLink>, which changed <code>{f.symbols.evidence.changedFunctions.join(', ')}</code> in {f.symbols.evidence.files.join(', ')}.
               {!f.symbols.evidence.repoMatch && ' The fix repository name does not match the package; check it.'}
               {' '}Review with <code>nextfix symbols confirm {f.advisory.id} {f.component.name}</code>.
             </p>
           ) : (
-            <p className="small muted">Hand-curated from the advisory{f.symbols.references?.[0] ? <> (<a href={f.symbols.references[0]} target="_blank" rel="noreferrer">source</a>)</> : null}.</p>
+            <p className="small muted">Hand-curated from the advisory{f.symbols.references?.[0] ? <> (<SafeLink href={f.symbols.references[0]}>source</SafeLink>)</> : null}.</p>
           )}
         </section>
       )}
@@ -223,7 +229,7 @@ function Detail({ f, scanId, targetId, targetName, tickets, kinds, onTicketsChan
       {f.advisory.references.length > 0 && (
         <section>
           <h3>References</h3>
-          <ul className="refs">{f.advisory.references.slice(0, 6).map((r) => <li key={r}><a href={r} target="_blank" rel="noreferrer">{r}</a></li>)}</ul>
+          <ul className="refs">{f.advisory.references.slice(0, 6).map((r) => <li key={r}><SafeLink href={r}>{r}</SafeLink></li>)}</ul>
         </section>
       )}
     </aside>

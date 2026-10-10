@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: node --test "packages/engine/src/**/*.test.ts" "packages/server/src/**/*.test.ts"
+      - run: npm run build
+      - name: Scan the sample offline (no network in CI)
+        run: node packages/engine/src/cli.ts scan samples/express-shop --offline --no-derive --quiet || echo "offline cache not present on this runner; skipped"

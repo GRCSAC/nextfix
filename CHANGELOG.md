@@ -5,6 +5,79 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-10
+
+A hardening release: the local server no longer trusts the network it sits on, the analyzer
+no longer reports code as safe for reasons that were wrong, and the command line can gate a
+build. Nothing in the report shape changed except new optional fields.
+
+### Security
+- **The server refuses requests it did not expect.** State-changing API calls must be
+  `application/json` (415 otherwise), must carry no `Origin` other than the server's own
+  (403), and must be addressed to a host the server was started for: `localhost`,
+  `127.0.0.1`, `[::1]`, the `--host` value, or names given with the new `--allow-host`
+  option (421 otherwise). Bodies over 1 MB are refused (413). A web page the user visits can
+  no longer scan folders, create tickets or change settings through the dashboard's port.
+- **Tracker tokens stay with the host they were entered for.** Integration settings accept
+  only their known keys; the GitHub `apiBase` and Jira `baseUrl` must be https (http only
+  for loopback) with no credentials, query or fragment; changing the host without re-entering
+  the token is refused. Secrets are never returned by any endpoint (now tested).
+- **A project's own `nextfix.config.json` is untrusted input.** `image` values that point
+  syft at the host (`dir:`, `file:`, archive sources, option-like strings) and `sbom` paths
+  outside the project are ignored with a log line; the same values on the command line are
+  honoured. Guard patterns are checked for length and nested quantifiers before they are
+  compiled, and matched against bounded text. The config's shape is validated with a plain
+  error naming the first wrong setting.
+- Advisory reference URLs are rendered as links only when they are http or https.
+
+### Fixed (analysis)
+- A route whose handler is named like `authController.login` or `auth.register` was taken
+  for an auth guard and the route dropped, so vulnerable code behind login and registration
+  endpoints was reported unreachable. The last argument of a registration is now always the
+  handler, and guard names are tested against the member name, not the receiver.
+- `require()` and `import()` inside a function count as imports, so lazily loaded packages
+  are no longer reported "installed but never imported".
+- `import x from 'pkg/sub'` records the sub-path as the symbol, so sub-path imports match
+  function-level data.
+- Request data is kept when a parameter is reassigned to itself (`src = src.trim()`) and
+  when a callback or closure captures a tainted local.
+- Inline middleware that rejects with 401/403 is recognised as a guard for Express and Koa,
+  as the decision model already said; a bare `throw` no longer counts as a rejection.
+- `./x.js` specifiers resolve to `x.ts` (NodeNext projects); `.jsx`, `.tsx`, `.mts`, `.cts`
+  and more index files are tried.
+- `this.method()` receivers and `new Pkg()` constructor calls are visible to symbol matching.
+- Exploitation evidence is taken across every CVE an advisory covers (KEV on any, highest
+  EPSS); the why line names the CVE when it is not the headline one.
+- A package found in the image at another version than the lockfile's is no longer analysed
+  as if the application ran it.
+- Version ordering for Maven, RubyGems, NuGet, Packagist and unknown schemes compares digit
+  runs numerically, so `1.10.0` is newer than `1.9.0` and real fixes are no longer rejected.
+- npm aliases (`"string-width-cjs": "npm:string-width@4"`) are inventoried under the real
+  package name and queried correctly.
+
+### Fixed (robustness)
+- A GitHub or network error during symbol derivation skips that advisory instead of aborting
+  the scan; an offline scan no longer records "no fix data" failures for seven days.
+- Two servers on one database: a `locks` table (schema `user_version` 1) makes scanning
+  exclusive across processes (409 while any scan runs), `/api/health` reports the other
+  server, and the second one logs a warning at start. Scans time out after `--scan-timeout`
+  minutes (default 20) and free the slot.
+- Reports written before 0.8 are shown with zeros for the tiers they predate.
+- Adding an application no longer inserts it when its first scan cannot start.
+- Tracker calls time out after 20 s, retry once on 403/429 honouring `Retry-After`, are
+  spaced one second apart in bulk, and record each created issue before continuing so a
+  retry never creates a duplicate. Jira issues get clickable links.
+- The server logs one sentence and exits 1 on a crash or a busy port instead of dying
+  silently; `--port` is validated.
+- `nextfix scan` without a folder exits 2; `--why` with a non-number falls back to 3.
+
+### Added
+- `nextfix scan … --fail-on Act|Attend|Track*|Track` exits 3 when any finding is decided
+  that or worse, for pipeline gates. Exit codes are documented in `--help`.
+- A GitHub Actions workflow runs typecheck, tests and the build on Ubuntu and Windows.
+- `scripts/set-version.mjs` keeps the README's version line in step.
+- Regression fixtures for every analyzer case above.
+
 ## [0.8.0] — 2026-10-09
 
 ### Added

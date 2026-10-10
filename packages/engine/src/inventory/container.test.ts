@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { detectSbomFiles, dockerSyftArgs, findOnPath, findSyft, mapPackage, parsePurl, parseSbom, readContainerInventory, runSyft } from './container.ts';
+import { configImageProblem, configSbomProblem, detectSbomFiles, dockerSyftArgs, findOnPath, findSyft, mapPackage, parsePurl, parseSbom, readContainerInventory, runSyft } from './container.ts';
 import { compareDistroVersion } from '../vulns/distro-version.ts';
 import { compareVersions, isDistro, osvQueryable, osvVersion } from '../vulns/ecosystems.ts';
 import { decide } from '../decide/ssvc.ts';
@@ -154,6 +154,29 @@ test('an image is inventoried through syft, and a syft failure is reported per i
   const none = await readContainerInventory(FIXTURES, { images: ['example/shop:1.2'], pathEnv: '', syftPath: undefined });
   assert.match(none.images[0]!.error ?? '', /neither syft .* nor Docker/);
   assert.equal(none.components.length, 0);
+});
+
+test('image and sbom values from a project config cannot reach the host', () => {
+  assert.equal(configImageProblem('ghcr.io/org/app:1.4'), undefined);
+  assert.equal(configImageProblem('registry:alpine:3.18'), undefined);
+  assert.equal(configImageProblem('localhost:5000/app@sha256:' + 'a'.repeat(64)), undefined);
+  assert.match(configImageProblem('dir:/')!, /host filesystem/);
+  assert.match(configImageProblem('file:///etc/shadow')!, /host filesystem/);
+  assert.match(configImageProblem('docker-archive:/tmp/x.tar')!, /host filesystem/);
+  assert.match(configImageProblem('-o')!, /option/);
+  assert.match(configImageProblem('a;b')!, /characters/);
+  const root = join(tmpdir(), 'proj');
+  assert.equal(configSbomProblem(root, 'build/app.cdx.json'), undefined);
+  assert.equal(configSbomProblem(root, './sbom.json'), undefined);
+  assert.match(configSbomProblem(root, '../other/app.cdx.json')!, /leaves the project/);
+  assert.match(configSbomProblem(root, join(tmpdir(), 'secrets.json'))!, /absolute path/);
+});
+
+test('version ordering for ecosystems without a formal scheme is numeric per segment', () => {
+  assert.ok(compareVersions('Maven', '1.10.0', '1.9.0') > 0);
+  assert.ok(compareVersions('RubyGems', '3.2.10', '3.2.9') > 0);
+  assert.ok(compareVersions('NuGet', '13.0.1', '13.0.0') > 0);
+  assert.ok(compareVersions('Packagist', '2.0.0', '2.0.0') === 0);
 });
 
 test('without a local syft, the official container is run against the daemon socket', () => {
