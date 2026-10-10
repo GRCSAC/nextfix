@@ -36,6 +36,8 @@ export interface ScanOptions {
   /** SBOM files to read, in addition to `sbom` in the config and any `*.cdx.json` / `*.spdx.json` at the root. */
   sboms?: string[];
   log?: (msg: string) => void;
+  /** Aborting it stops the scan at the next stage boundary (or finding) with an error whose message starts with "Scan cancelled". */
+  signal?: AbortSignal;
 }
 
 const IMAGE_ONLY: ReachResult = { tier: 'image-only', confidence: 'package-level', importedIn: [], callSites: [], paths: [] };
@@ -62,6 +64,10 @@ const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
 export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanReport> {
   const rootDir = resolve(dir);
   const log = opts.log ?? (() => {});
+  const checkAbort = () => {
+    if (opts.signal?.aborted) throw new Error('Scan cancelled');
+  };
+  checkAbort();
   const cache = new Cache(opts.cachePath);
   try {
     const config = loadConfig(rootDir);
@@ -83,6 +89,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     const sbomFiles = [...new Set([...configSboms, ...(opts.sboms ?? []), ...detectSbomFiles(rootDir)])];
     if (!hasNode && !hasPy && !imageRefs.length && !sbomFiles.length) throw new Error(`No package-lock.json, Python requirements/lockfile, SBOM or container image for ${rootDir}.`);
 
+    checkAbort();
     const components: Component[] = [];
     let projectName: string | undefined;
     let projectVersion: string | undefined;
@@ -101,6 +108,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     }
     let images: ImageInventory[] | undefined;
     if (imageRefs.length || sbomFiles.length) {
+      checkAbort();
       const ci = await readContainerInventory(rootDir, { images: imageRefs, sboms: sbomFiles, syftPath: config.syft, log });
       const have = new Map(components.map((c) => [componentKey(c), c]));
       let added = 0;
@@ -120,23 +128,28 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     const inv = { components, projectName: projectName ?? basename(rootDir), projectVersion };
     const lockfileNames = new Set(components.filter((c) => c.origin !== 'image').map((c) => c.name));
 
+    checkAbort();
     log('Code: building call graph and entry points');
     let graph = analyzeProject(rootDir, config);
     if (hasPy) {
+      checkAbort();
       const installed = new Set(components.filter((c) => c.ecosystem === 'PyPI').map((c) => c.name));
       const pyGraph = await analyzePythonProject(rootDir, { installed, authGuards: config.authGuards, ignore: config.ignore, internalRoutes: config.internalRoutes });
       graph = hasNode ? mergeGraphs(graph, pyGraph) : mergeGraphs(pyGraph, graph);
     }
     log(`Code: ${graph.modules.size} modules, ${graph.functions.size} functions, ${graph.entryPoints.length} entry points`);
 
+    checkAbort();
     const exposure = analyzeExposure(rootDir, graph.listenLocalOnly);
 
     log('Advisories: OSV');
     const advisories = await fetchAdvisories(inv.components, { cache, offline: opts.offline, log });
     const cves = [...new Set([...advisories.values()].flat().flatMap((a) => a.cves ?? (a.cve ? [a.cve] : [])))];
     log(`Advisories: ${[...advisories.values()].flat().length} across ${advisories.size} components; EPSS + KEV for ${cves.length} CVEs`);
+    checkAbort();
     const [epss, kev] = await Promise.all([fetchEpss(cves, cache, opts.offline), fetchKev(cache, opts.offline)]);
 
+    checkAbort();
     const store = new DerivedStore(cache);
     const symbols = SymbolDb.load(undefined, store.all());
 
@@ -157,6 +170,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       // Several advisories at once: derivation is bound by GitHub fetch latency, not CPU.
       const worker = async () => {
         while (queue.length && !stopped) {
+          checkAbort();
           const { c, a } = queue.shift()!;
           if (Date.now() - started > budget) {
             deferred++;
@@ -183,6 +197,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
         }
       };
       await Promise.all(Array.from({ length: opts.deriveConcurrency ?? 4 }, worker));
+      checkAbort();
       log(`Symbols: ${derived} newly derived from fix commits, ${skipped} advisories without usable fix data${deferred ? `, ${deferred} deferred to the next scan (time budget)` : ''}`);
     }
 
@@ -190,6 +205,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     void (findings as unknown);
     for (const c of inv.components) {
       for (const a of advisories.get(c.purl) ?? []) {
+        checkAbort();
         const sym = symbols.lookup([a.id, ...a.aliases], c.name);
         // A package that exists only in the image is analysed through the code graph only when the
         // application imports it and the lockfile has no copy of its own (the app resolves its own
@@ -209,6 +225,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
         findings.push({ ...partial, ...decide(partial) });
       }
     }
+    checkAbort();
     findings.sort((x, y) => DECISION_ORDER.indexOf(x.decision) - DECISION_ORDER.indexOf(y.decision) || y.score - x.score || x.component.name.localeCompare(y.component.name));
 
     const byDecision = { Act: 0, Attend: 0, 'Track*': 0, Track: 0 } as Record<Decision, number>;
@@ -225,7 +242,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       generatedAt: new Date().toISOString(),
       summary: {
         components: inv.components.length,
-        advisories: [...advisories.values()].flat().length,
+        advisories: new Set([...advisories.values()].flat().map((a) => a.id)).size,
         findings: findings.length,
         byDecision,
         byTier,

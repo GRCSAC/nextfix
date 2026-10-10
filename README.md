@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.8.1` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.8.2` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -24,10 +24,16 @@ npm run serve        # builds the UI and opens http://127.0.0.1:8790
 
 Enter a project folder on the welcome screen. NextFix scans it and keeps the history.
 
-- **Overview** (executives): total findings with a dot per decision, the remediation
-  command center ring with Fix now / Fix next cycle / Set aside with evidence / Watch,
-  entry points without authentication, the trend across scans, where the findings landed,
-  component states, what to fix first, and evidence & exceptions.
+- **Overview** (executives): one question per panel. A **posture verdict** (Exposed,
+  Attention, Contained, Clean) with the sentence and the rule behind it; the **evidence
+  funnel** from every advisory found down to the ones that are reachable without a login,
+  carry request data and are known or likely exploited, with what each step removed; **what
+  changed** since the previous scan as a bridge with the items named; the **work queue** (the
+  four decisions, once); the **shortest path to green** (upgrades ranked by what they close,
+  with the sentence "N upgrades clear everything that needs action"); **where an attacker
+  gets in** (entry points as tiles sized by what they reach); **why each decision** (a
+  reachability × exploitation matrix); the trend; and the evidence for auditors. "Print
+  summary" turns the page into a one-sheet report.
 - **Findings** (engineers): the queue filtered by decision, reachability and search; each
   finding opens with the plain-English why, the call path from entry point to vulnerable
   function (showing where request data enters), the upgrade command, copy-as-ticket, and
@@ -266,7 +272,9 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Go (govulncheck wrapper) | ⬜ |
 | Web UI: Overview, Findings, Components, Evidence, Reports, Apps, Settings | ✅ |
 | Brand applied (see docs/BRAND.md) | ✅ |
-| Server mode: SQLite history, trends, scan diff, JSON API | ✅ |
+| Server mode: SQLite history, trends, scan diff with reasons, finding history + SLA ageing, progress and cancel, JSON API | ✅ |
+| Executive Overview: posture verdict, evidence funnel, what changed, fix leverage, attack surface, decision matrix, print summary | ✅ |
+| Re-check exploit data without re-scanning (KEV/EPSS re-decide) | ✅ |
 | SSO (OIDC), RBAC, audit log, API tokens | ⬜ |
 | Container image inventory (syft binary or container; CycloneDX / SPDX / Grype input; distro ecosystems) | ✅ |
 | Jira / GitHub Issues export (per finding and bulk, links remembered) | ✅ |
@@ -278,7 +286,9 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 
 ## Parking lot
 
-- Executive one-page PDF export; scheduled re-scans; e-mail or Slack digest.
+- Executive PDF beyond the print summary; scheduled re-scans and nightly re-decide; e-mail,
+  Slack or Teams digest; portfolio view across applications; human exceptions with approver
+  and expiry; SARIF output.
 - NestJS and Hapi entry-point detection.
 - Framework objects beyond Express `res` (e.g. Next.js API routes, serverless handlers).
 - Image sources beyond the daemon and registries when syft runs in its container (`dir:`,

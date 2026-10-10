@@ -13,7 +13,7 @@ export function Evidence({ report, scanId, query, go }: { report: ScanReport; sc
   return (
     <div className="stack">
       <div className="filters">
-        <button type="button" className="chip" aria-pressed={open === 'all'} onClick={() => setOpen('all')}>All set-asides <span className="n">{total}</span></button>
+        <button type="button" className="chip" aria-pressed={open === 'all'} onClick={() => setOpen('all')}>All evidence <span className="n">{total}</span></button>
         {EVIDENCE_TIERS.map((t) => (
           <button key={t.tier} type="button" className="chip" aria-pressed={open === t.tier} onClick={() => setOpen(open === t.tier ? 'all' : t.tier)}>{t.label} <span className="n">{report.summary.byTier[t.tier]}</span></button>
         ))}

@@ -1,6 +1,6 @@
 {
   "name": "@nextfix/engine",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "description": "NextFix analysis engine: inventory, advisories, call-graph reachability, exposure, decisions.",

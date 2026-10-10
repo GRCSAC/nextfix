@@ -74,9 +74,10 @@ The repository opens once the five remaining feature-table items are done, in th
 2. Container image inventory through a Syft adapter (0.8) — done 2026-10-09
    - 0.8.1 hardening (server origin/host/content-type defences, tracker-host allowlist,
      analyzer false-safe fixes, CI gate, CI workflow) — done 2026-10-10 after a full review
-   - 0.8.2 experience release (phone layout, Overview rebuilt around verdict / funnel /
-     what changed / fix leverage, one vocabulary, progress and cancel, contrast and theme
-     fixes, reachability performance) — next
+   - 0.8.2 experience release (Overview rebuilt around verdict / funnel / what changed /
+     fix leverage / attack surface / matrix / ageing, re-check exploit data, finding history
+     and SLA, phone layout, progress and cancel, contrast and theme fixes, reachability
+     performance) — done 2026-10-10
 3. Go via govulncheck (0.9)
 4. Team features: local accounts, roles, audit log, API tokens, OIDC (0.10)
 5. Packaging: single executable per platform, Docker image, Windows installer (1.0)

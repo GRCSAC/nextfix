@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, request, type Server } from 'node:http';
+import { createServer, request, type Server, type IncomingHttpHeaders } from 'node:http';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from './store.ts';
-import { createNextFixServer } from './server.ts';
-import type { ScanReport } from '../../engine/src/types.ts';
+import { gunzipSync } from 'node:zlib';
+import { DatabaseSync } from 'node:sqlite';
+import { Store, type HistorySummary } from './store.ts';
+import { createNextFixServer, localStamp } from './server.ts';
+import { diffReports } from './diff.ts';
+import type { Finding, ScanReport } from '../../engine/src/types.ts';
 
 /** A tiny tracker double that records what it is sent. */
 function mockTracker(opts: { rateLimitOnce?: boolean } = {}) {
@@ -35,12 +38,12 @@ function mockTracker(opts: { rateLimitOnce?: boolean } = {}) {
 }
 
 /** fetch refuses to set a Host header, so the Host checks use a raw request. */
-function raw(port: number, path: string, headers: Record<string, string>, method = 'GET'): Promise<{ status: number; body: string }> {
+function raw(port: number, path: string, headers: Record<string, string>, method = 'GET'): Promise<{ status: number; body: string; bytes: Buffer; headers: IncomingHttpHeaders }> {
   return new Promise((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port, path, method, headers, setHost: false }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString(), bytes: Buffer.concat(chunks), headers: res.headers }));
     });
     req.on('error', reject);
     req.end();
@@ -260,7 +263,7 @@ test('reports written before 0.8 are normalised so every decision and tier has a
     assert.equal(scans[0]!.summary.byTier['image-only'], 0);
     const targets = (await (await f.api('/api/targets')).json()) as { lastScan: { summary: ScanReport['summary'] } }[];
     assert.equal(targets[0]!.lastScan.summary.byDecision['Track*'], 0);
-    assert.equal(f.store.schemaVersion, 1);
+    assert.equal(f.store.schemaVersion, 2);
   } finally {
     f.close();
   }
@@ -273,17 +276,20 @@ test('a scan running anywhere on the database blocks new targets and shows in he
   try {
     assert.equal(other.acquireServerLock('127.0.0.1', 8791)?.pid, f.store.pid, 'the second server is warned about the first');
     assert.equal(f.store.otherServer()?.pid, other.pid, 'the first server sees the second');
-    const h1 = (await (await f.api('/api/health')).json()) as { scanning: boolean; otherServer?: { pid: number; port: number; since: string }; dbPath: string; cachePath: string };
+    const h1 = (await (await f.api('/api/health')).json()) as { scanning: { targetId: number | null; stage: string; startedAt: string } | null; otherServer?: { pid: number; port: number; since: string }; dbPath: string; cachePath: string };
     assert.equal(h1.otherServer?.pid, other.pid);
     assert.equal(h1.otherServer?.port, 8791);
     assert.ok(h1.otherServer?.since);
-    assert.equal(h1.scanning, false);
+    assert.equal(h1.scanning, null);
     assert.ok(h1.dbPath && h1.cachePath, 'Settings still gets its paths');
 
     // the other process starts a scan
     assert.equal(other.beginScan('127.0.0.1', 8791), true);
     assert.equal(other.beginScan('127.0.0.1', 8791), false, 'the lock is exclusive');
-    assert.equal(((await (await f.api('/api/health')).json()) as { scanning: boolean }).scanning, true);
+    const h2 = (await (await f.api('/api/health')).json()) as { scanning: { targetId: number | null; stage: string; startedAt: string } | null };
+    assert.equal(h2.scanning?.targetId, null, 'a scan on another server has no local target');
+    assert.equal(h2.scanning?.stage, 'Running on another server');
+    assert.ok(h2.scanning?.startedAt);
     writeFileSync(join(f.dir, 'package-lock.json'), '{}');
     const busy = await f.api('/api/targets', { method: 'POST', body: JSON.stringify({ dir: f.dir }) });
     assert.equal(busy.status, 409);
@@ -333,5 +339,324 @@ test('tracker calls: one retry after Retry-After, bulk creations spaced out, eve
     spaced.close();
     tracker.server.close();
     f.close();
+  }
+});
+
+// ---- history, settings, diff reasons, progress/cancel, payload shape, gzip, retention ----
+
+const DAY = 86_400_000;
+const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
+
+/** A report whose findings are the given ids (all copies of the fake finding), stamped at `at`. */
+function reportWith(ids: string[], at: string, patch: (f: Finding, i: number) => void = () => {}): ScanReport {
+  const base = fakeReport();
+  const template = base.findings[0]!;
+  base.findings = ids.map((id, i) => {
+    const f = structuredClone(template);
+    f.id = id;
+    f.advisory = { ...f.advisory, id: id.split('|')[1] ?? f.advisory.id };
+    patch(f, i);
+    return f;
+  });
+  base.summary.findings = base.findings.length;
+  base.generatedAt = at;
+  return base;
+}
+
+const X = 'pkg:npm/lodash@4.17.15|GHSA-x';
+const Y = 'pkg:npm/lodash@4.17.15|GHSA-y';
+
+test('finding history: first/last seen, resolved and reopened, derived numbers, first-seen on the list payload', async () => {
+  const f = await fixture();
+  try {
+    const target = f.store.upsertTarget('C:/x/hist', 'hist');
+    const s1 = f.store.addScan(target.id, reportWith([X], ago(40)));
+    const s2 = f.store.addScan(target.id, reportWith([X, Y], ago(20), (x, i) => { if (i === 1) x.decision = 'Attend'; }));
+    const s3 = f.store.addScan(target.id, reportWith([Y], ago(10), (x) => { x.decision = 'Attend'; }));
+
+    let h = (await (await f.api(`/api/targets/${target.id}/history`)).json()) as HistorySummary;
+    const rx = h.rows.find((r) => r.findingId === X)!;
+    const ry = h.rows.find((r) => r.findingId === Y)!;
+    assert.equal(rx.firstScanId, s1.id);
+    assert.equal(rx.lastScanId, s2.id);
+    assert.equal(rx.resolvedScanId, s3.id, 'X vanished in scan 3');
+    assert.equal(rx.resolvedAt, s3.createdAt, 'resolved at the scan that no longer had it');
+    assert.equal(ry.firstScanId, s2.id);
+    assert.equal(ry.resolvedAt, null);
+    assert.equal(ry.decisionLatest, 'Attend');
+    assert.deepEqual(h.open.Attend, { '0-7': 0, '8-30': 1, '31-90': 0, '90+': 0 }, 'Y is 20 days old');
+    assert.equal(h.open.Act['31-90'], 0, 'X is resolved, so not open');
+    assert.equal(h.pastSla.Attend, 0, '20 days is inside the 30-day Attend SLA');
+    assert.equal(h.pastSla.Act, 0);
+    assert.equal(h.resolvedLast30, 1);
+    assert.equal(h.introducedLast30, 1, 'Y arrived 20 days ago; X is older');
+    assert.equal(h.medianDaysToResolve, 30, 'X: first seen 40 days ago, resolved 10 days ago');
+    assert.deepEqual(h.sla, { slaActDays: 7, slaAttendDays: 30 });
+    assert.deepEqual(Object.keys(h.firstSeen), [Y]);
+
+    // X comes back: un-resolved, first seen kept
+    const s4 = f.store.addScan(target.id, reportWith([X, Y], ago(1), (x, i) => { if (i === 1) x.decision = 'Attend'; }));
+    h = (await (await f.api(`/api/targets/${target.id}/history`)).json()) as HistorySummary;
+    const rx2 = h.rows.find((r) => r.findingId === X)!;
+    assert.equal(rx2.resolvedAt, null);
+    assert.equal(rx2.firstScanId, s1.id);
+    assert.equal(rx2.lastScanId, s4.id);
+    assert.equal(h.open.Act['31-90'], 1, 'age counts from the first sighting');
+    assert.equal(h.pastSla.Act, 1, '40 days is past the 7-day Act SLA');
+
+    // the list payload carries firstSeenAt
+    const report = (await (await f.api(`/api/scans/${s4.id}`)).json()) as { findings: { id: string; firstSeenAt?: string }[] };
+    assert.equal(report.findings.find((x) => x.id === X)!.firstSeenAt, s1.createdAt);
+    assert.equal(report.findings.find((x) => x.id === Y)!.firstSeenAt, s2.createdAt);
+
+    // a tighter SLA via settings
+    assert.equal((await f.api('/api/settings', { method: 'PUT', body: JSON.stringify({ slaAttendDays: 2 }) })).status, 200);
+    h = (await (await f.api(`/api/targets/${target.id}/history`)).json()) as HistorySummary;
+    assert.equal(h.pastSla.Attend, 1);
+    assert.equal((await f.api('/api/targets/999/history')).status, 404);
+  } finally {
+    f.close();
+  }
+});
+
+test('finding history is backfilled from stored scans when the table arrives', async () => {
+  const f = await fixture();
+  const target = f.store.upsertTarget('C:/x/old', 'old');
+  f.store.addScan(target.id, reportWith([X], ago(30)));
+  f.store.addScan(target.id, reportWith([X, Y], ago(20)));
+  f.store.addScan(target.id, reportWith([Y], ago(10)));
+  const before = f.store.listHistory(target.id);
+  f.close();
+  // pretend the database predates version 2
+  const db = new DatabaseSync(f.dbPath);
+  db.exec('DELETE FROM finding_history; PRAGMA user_version = 1');
+  db.close();
+  const reopened = new Store(f.dbPath);
+  try {
+    assert.equal(reopened.schemaVersion, 2);
+    assert.deepEqual(reopened.listHistory(target.id), before, 'walking the scans oldest to newest rebuilds the same rows');
+  } finally {
+    reopened.close();
+  }
+});
+
+test('settings: defaults, validation, retention prunes old scans, deleting a target cascades', async () => {
+  const f = await fixture();
+  try {
+    assert.deepEqual(await (await f.api('/api/settings')).json(), { slaActDays: 7, slaAttendDays: 30, retentionScans: 50 });
+    assert.equal((await f.api('/api/settings', { method: 'PUT', body: JSON.stringify({ slaActDays: 0 }) })).status, 400);
+    assert.equal((await f.api('/api/settings', { method: 'PUT', body: JSON.stringify({ slaActDays: 'soon' }) })).status, 400);
+    const put = await f.api('/api/settings', { method: 'PUT', body: JSON.stringify({ slaActDays: 3, retentionScans: 2, bogus: 1 }) });
+    assert.deepEqual(await put.json(), { slaActDays: 3, slaAttendDays: 30, retentionScans: 2 });
+
+    const target = f.store.upsertTarget('C:/x/ret', 'ret');
+    const s1 = f.store.addScan(target.id, reportWith([X], ago(3)));
+    const s2 = f.store.addScan(target.id, reportWith([X], ago(2)));
+    const s3 = f.store.addScan(target.id, reportWith([X], ago(1)));
+    assert.deepEqual(f.store.listScans(target.id).map((s) => s.id), [s2.id, s3.id], 'only the newest 2 scans are kept');
+    assert.equal(f.store.getReport(s1.id), undefined);
+    assert.equal(f.store.listHistory(target.id)[0]!.firstScanId, s1.id, 'history remembers the pruned scan');
+    const targets = f.store.listTargets();
+    assert.equal(targets[0]!.lastScan?.id, s3.id);
+
+    f.store.addTicket(target.id, X, 'github', '#1', 'https://github.com/x/y/issues/1');
+    assert.equal((await f.api(`/api/targets/${target.id}`, { method: 'DELETE' })).status, 204);
+    assert.deepEqual(f.store.listScans(target.id), []);
+    assert.deepEqual(f.store.listHistory(target.id), []);
+    assert.deepEqual(f.store.listTickets(target.id), {});
+    assert.deepEqual(f.store.listTargets(), []);
+  } finally {
+    f.close();
+  }
+});
+
+test('diff: reasons for tier, decision, fix, KEV and request data; PyPI names compare case-insensitively', () => {
+  const prev = reportWith([X, Y, 'pkg:pypi/PyYAML@5.3|GHSA-p', 'pkg:npm/old@1|GHSA-gone'], ago(2), (f, i) => {
+    if (i === 0) { f.decision = 'Attend'; f.reach.tier = 'called-unreached'; f.reach.paths = []; f.advisory = { ...f.advisory, fixedVersion: undefined }; }
+    if (i === 1) { f.decision = 'Act'; f.kev = { dateAdded: '2024-01-01', ransomware: false }; }
+  });
+  const cur = reportWith([X, Y, 'pkg:pypi/pyyaml@5.3|GHSA-p', 'pkg:npm/new@1|GHSA-new'], ago(1), (f, i) => {
+    if (i === 0) { f.decision = 'Act'; f.advisory = { ...f.advisory, fixedVersion: '4.18.0' }; }
+    if (i === 1) { f.decision = 'Attend'; f.kev = undefined; f.reach.paths[0]!.userInput = false; }
+  });
+  const d = diffReports(cur, prev);
+  assert.deepEqual(d.added.map((f) => f.id), ['pkg:npm/new@1|GHSA-new']);
+  assert.deepEqual(d.resolved.map((f) => f.id), ['pkg:npm/old@1|GHSA-gone']);
+  const x = d.changed.find((c) => c.finding.id === X)!;
+  assert.equal(x.from, 'Attend');
+  assert.equal(x.to, 'Act');
+  assert.deepEqual(x.reasons, ['decision Attend → Act', 'new entry point reaches it', 'request data now reaches it', 'fix published 4.18.0']);
+  const y = d.changed.find((c) => c.finding.id === Y)!;
+  assert.deepEqual(y.reasons, ['decision Act → Attend', 'left KEV', 'request data no longer reaches it']);
+  assert.equal(d.changed.some((c) => c.finding.id.startsWith('pkg:pypi/')), false, 'the renamed PyPI finding is unchanged');
+  assert.deepEqual(d.summary, { added: 1, resolved: 1, escalated: 1, deescalated: 1 });
+  assert.deepEqual(diffReports(cur, undefined).summary, { added: 0, resolved: 0, escalated: 0, deescalated: 0 });
+});
+
+test('scan progress shows the stage, DELETE /api/scan cancels, nothing is stored', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nextfix-test-'));
+  const store = new Store(join(dir, 'test.sqlite'));
+  let seenSignal: AbortSignal | undefined;
+  const scanner = (_dir: string, o: { log?: (m: string) => void; signal?: AbortSignal }) =>
+    new Promise<ScanReport>((_resolve, reject) => {
+      seenSignal = o.signal;
+      o.log?.('Inventory: reading package-lock.json');
+      o.log?.('Code: building call graph and entry points');
+      setTimeout(() => o.log?.('Advisories: OSV'), 20);
+      o.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+  const app = createNextFixServer({ store, staticDir: dir, scanner });
+  const port = await listen(app);
+  const api = (path: string, init: RequestInit = {}) => fetch(`http://127.0.0.1:${port}${path}`, { ...init, headers: { 'content-type': 'application/json' } });
+  try {
+    assert.equal((await api('/api/scan', { method: 'DELETE' })).status, 404, 'nothing to cancel yet');
+    assert.equal(await (await api('/api/scan/progress')).json(), null);
+    const target = store.upsertTarget('C:/x/slow', 'slow');
+    const started = api(`/api/targets/${target.id}/scan`, { method: 'POST' });
+    type Progress = { targetId: number; stage: string; lines: string[]; startedAt: string } | null;
+    const readProgress = async () => (await (await api('/api/scan/progress')).json()) as Progress;
+    let progress = await readProgress();
+    for (let i = 0; i < 50 && progress?.stage !== 'Advisories'; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      progress = await readProgress();
+    }
+    assert.equal(progress?.targetId, target.id);
+    assert.equal(progress?.stage, 'Advisories');
+    assert.deepEqual(progress?.lines, ['Inventory: reading package-lock.json', 'Code: building call graph and entry points', 'Advisories: OSV']);
+    assert.ok(progress?.startedAt);
+    const health = (await (await api('/api/health')).json()) as { scanning: { targetId: number; stage: string; startedAt: string } | null };
+    assert.deepEqual(health.scanning, { targetId: target.id, stage: 'Advisories', startedAt: progress!.startedAt });
+    assert.equal((await api(`/api/targets/${target.id}/scan`, { method: 'POST' })).status, 409, 'one scan at a time');
+
+    const cancel = await api('/api/scan', { method: 'DELETE' });
+    assert.equal(cancel.status, 202);
+    assert.deepEqual(await cancel.json(), { cancelled: true });
+    const res = await started;
+    assert.equal(res.status, 409);
+    assert.equal(((await res.json()) as { error: string }).error, 'Scan cancelled');
+    assert.equal(seenSignal?.aborted, true, 'the signal reached the engine');
+    assert.deepEqual(store.listScans(target.id), [], 'a cancelled scan stores nothing');
+    assert.equal(store.scanInProgress(), false, 'the lock is released');
+    assert.equal(await (await api('/api/scan/progress')).json(), null);
+    assert.equal(((await (await api('/api/health')).json()) as { scanning: unknown }).scanning, null);
+  } finally {
+    app.close();
+    store.close();
+  }
+});
+
+test('report payload: no advisory details, references capped at 6, full finding on its own route, full JSON download', async () => {
+  const f = await fixture();
+  try {
+    const target = f.store.upsertTarget('C:/x/shape', 'shape');
+    const report = reportWith([X], ago(1), (x) => {
+      x.advisory = { ...x.advisory, details: 'A very long advisory text '.repeat(50), references: Array.from({ length: 9 }, (_, i) => `https://example.test/ref/${i}`) };
+    });
+    const scan = f.store.addScan(target.id, report);
+    const list = (await (await f.api(`/api/scans/${scan.id}`)).json()) as { findings: { id: string; firstSeenAt?: string; advisory: Record<string, unknown> & { references: string[]; referenceCount: number } }[] };
+    const a = list.findings[0]!.advisory;
+    assert.equal('details' in a, false);
+    assert.equal(a.references.length, 6);
+    assert.equal(a.referenceCount, 9);
+    assert.equal(list.findings[0]!.firstSeenAt, scan.createdAt);
+
+    const full = await f.api(`/api/scans/${scan.id}/findings/${encodeURIComponent(X)}`);
+    assert.equal(full.status, 200);
+    const fb = (await full.json()) as Finding & { firstSeenAt?: string };
+    assert.equal(fb.advisory.references.length, 9);
+    assert.ok(fb.advisory.details.startsWith('A very long'));
+    assert.equal(fb.firstSeenAt, scan.createdAt);
+    assert.equal((await f.api(`/api/scans/${scan.id}/findings/${encodeURIComponent('pkg:npm/nope@1|GHSA-no')}`)).status, 404);
+
+    const dl = await f.api(`/api/scans/${scan.id}/json`);
+    assert.equal(dl.status, 200);
+    const stamp = localStamp(report.generatedAt);
+    assert.match(stamp, /^\d{4}-\d{2}-\d{2}-\d{4}$/);
+    assert.equal(dl.headers.get('content-disposition'), `attachment; filename="express-shop-${stamp}.nextfix.json"`);
+    const dlBody = (await dl.json()) as ScanReport;
+    assert.equal(dlBody.findings[0]!.advisory.references.length, 9, 'the download is the whole report');
+    assert.ok(dlBody.findings[0]!.advisory.details.length > 100);
+    const vex = await f.api(`/api/scans/${scan.id}/vex`);
+    assert.equal(vex.headers.get('content-disposition'), `attachment; filename="express-shop-${stamp}.openvex.json"`);
+  } finally {
+    f.close();
+  }
+});
+
+test('gzip when accepted, identity otherwise, HEAD carries headers and no body', async () => {
+  const f = await fixture();
+  try {
+    const target = f.store.upsertTarget('C:/x/gz', 'gz');
+    const scan = f.store.addScan(target.id, reportWith(Array.from({ length: 30 }, (_, i) => `pkg:npm/lodash@4.17.15|GHSA-${i}`), ago(1)));
+    const plain = await raw(f.port, `/api/scans/${scan.id}`, { host: 'localhost' });
+    assert.equal(plain.headers['content-encoding'], undefined);
+    assert.equal(Number(plain.headers['content-length']), plain.bytes.length);
+    const gz = await raw(f.port, `/api/scans/${scan.id}`, { host: 'localhost', 'accept-encoding': 'gzip, deflate, br' });
+    assert.equal(gz.headers['content-encoding'], 'gzip');
+    assert.equal(gz.headers.vary, 'accept-encoding');
+    assert.ok(gz.bytes.length < plain.bytes.length / 2, `gzip ${gz.bytes.length} vs ${plain.bytes.length}`);
+    assert.equal(gunzipSync(gz.bytes).toString(), plain.body);
+    const small = await raw(f.port, '/api/settings', { host: 'localhost', 'accept-encoding': 'gzip' });
+    assert.equal(small.headers['content-encoding'], undefined, 'tiny bodies are not compressed');
+    const refused = await raw(f.port, `/api/scans/${scan.id}`, { host: 'localhost', 'accept-encoding': 'gzip;q=0, identity' });
+    assert.equal(refused.headers['content-encoding'], undefined);
+
+    const head = await raw(f.port, `/api/scans/${scan.id}`, { host: 'localhost' }, 'HEAD');
+    assert.equal(head.status, 200);
+    assert.equal(head.bytes.length, 0);
+    assert.equal(head.headers['content-length'], plain.headers['content-length']);
+    assert.equal(head.headers['content-type'], 'application/json; charset=utf-8');
+    writeFileSync(join(f.dir, 'index.html'), `<!doctype html><title>t</title>${'<p>hello</p>'.repeat(200)}`);
+    const staticHead = await raw(f.port, '/', { host: 'localhost', 'accept-encoding': 'gzip' }, 'HEAD');
+    assert.equal(staticHead.status, 200);
+    assert.equal(staticHead.bytes.length, 0);
+    assert.equal(staticHead.headers['content-encoding'], 'gzip');
+    const staticGz = await raw(f.port, '/', { host: 'localhost', 'accept-encoding': 'gzip' });
+    assert.ok(gunzipSync(staticGz.bytes).toString().startsWith('<!doctype html>'));
+  } finally {
+    f.close();
+  }
+});
+
+test('redecide: the decision step re-runs over the latest report with EPSS/KEV from the cache, stores nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nextfix-test-'));
+  const store = new Store(join(dir, 'test.sqlite'));
+  const cachePath = join(dir, 'cache.sqlite');
+  const app = createNextFixServer({ store, staticDir: dir, cachePath });
+  const port = await listen(app);
+  const api = (path: string, init: RequestInit = {}) => fetch(`http://127.0.0.1:${port}${path}`, { ...init, headers: { 'content-type': 'application/json' } });
+  try {
+    const target = store.upsertTarget('C:/x/redecide', 'redecide');
+    assert.equal((await api(`/api/targets/${target.id}/redecide`, { method: 'POST' })).status, 404, 'no scan yet');
+    // reachable only behind auth, nothing known about exploitation: Attend
+    const report = reportWith([X], ago(1), (x) => {
+      x.decision = 'Attend';
+      x.reach.paths[0]!.entry = { ...x.reach.paths[0]!.entry, authenticated: true, guards: ['requireLogin'] };
+    });
+    const scan = store.addScan(target.id, report);
+    // a seeded cache: the CVE is now in KEV, the EPSS lookup is cached as empty
+    const cache = new DatabaseSync(cachePath);
+    cache.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL, exp INTEGER NOT NULL)');
+    const exp = Date.now() + DAY;
+    cache.prepare('INSERT INTO kv (k, v, exp) VALUES (?, ?, ?)').run('kev:catalog', JSON.stringify({ 'CVE-2021-23337': { dateAdded: '2026-10-01', ransomware: false } }), exp);
+    cache.prepare('INSERT INTO kv (k, v, exp) VALUES (?, ?, ?)').run('epss:CVE-2021-23337', 'null', exp);
+    cache.close();
+
+    const res = await api(`/api/targets/${target.id}/redecide`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { scanId: number; changed: { finding: Finding; from: string; to: string; reasons: string[] }[]; summary: { changed: number; escalated: number; deescalated: number } };
+    assert.equal(body.scanId, scan.id);
+    assert.equal(body.changed.length, 1);
+    assert.equal(body.changed[0]!.from, 'Attend');
+    assert.equal(body.changed[0]!.to, 'Act');
+    assert.deepEqual(body.changed[0]!.reasons, ['decision Attend → Act', 'entered KEV']);
+    assert.equal(body.changed[0]!.finding.kev?.cve, 'CVE-2021-23337');
+    assert.equal(body.changed[0]!.finding.exploitation, 'active');
+    assert.deepEqual(body.summary, { changed: 1, escalated: 1, deescalated: 0 });
+    assert.equal(store.getReport(scan.id)!.findings[0]!.decision, 'Attend', 'the stored report is untouched');
+    assert.equal(store.listScans(target.id).length, 1);
+  } finally {
+    app.close();
+    store.close();
   }
 });

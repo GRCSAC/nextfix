@@ -6,7 +6,7 @@ export function HowItWorks({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="How NextFix decides" onClose={onClose} wide>
       <p className="lead">Scanners find vulnerabilities. NextFix works out which ones are <strong>reachable</strong> from an entry point, <strong>exposed</strong> to an attacker, and <strong>exploited</strong> in the wild, then hands down one of four decisions with the evidence attached.</p>
-      <h3>Reachability, in six tiers</h3>
+      <h3>Reachability, in seven tiers</h3>
       <ol className="tiers">
         {TIERS.map((t) => <li key={t}><strong>{TIER_LABEL[t]}</strong></li>)}
       </ol>

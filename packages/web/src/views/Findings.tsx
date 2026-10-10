@@ -1,32 +1,52 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { Decision, Finding, Integrations, ReachTier, ScanReport, TicketKind, TicketMap } from '../api.ts';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { Decision, Finding, FullFinding, Integrations, ReachTier, ScanReport, TicketKind, TicketMap } from '../api.ts';
 import { api } from '../api.ts';
 import { DecisionBadge } from '../components/DecisionBadge.tsx';
 import { PathDiagram } from '../components/PathDiagram.tsx';
 import { I } from '../components/Icons.tsx';
-import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, bestPath, entryLabel, fixCommand, severity, ticketMarkdown } from '../format.ts';
+import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, bestPath, entryLabel, fixCommand, severity, shortDate, ticketMarkdown } from '../format.ts';
 
 interface Props {
   report: ScanReport;
+  /** Finding id → first seen, from the scan history. */
+  firstSeen: Record<string, string>;
   scanId: number;
   targetId: number;
   selectedId?: string;
+  /** Filters come from the hash: decision, tier, q. */
   query: Record<string, string>;
   tickets: TicketMap;
   integrations: Integrations;
   onSelect: (id?: string) => void;
+  /** Writes filters back to the hash; `replace` for keystrokes so Back skips them. */
+  onQuery: (query: Record<string, string>, replace?: boolean) => void;
   onTicketsChange: () => void;
 }
 
 const KIND_LABEL: Record<TicketKind, string> = { github: 'GitHub issue', jira: 'Jira issue' };
+const PHONE = '(max-width: 760px)';
+const SHEET = '(max-width: 1100px)';
 
-export function Findings({ report, scanId, targetId, selectedId, query, tickets, integrations, onSelect, onTicketsChange }: Props) {
-  const [decision, setDecision] = useState<Decision | 'all'>((query.decision as Decision) || 'all');
-  const [tier, setTier] = useState<ReachTier | 'all'>((query.tier as ReachTier) || 'all');
-  const [q, setQ] = useState(query.q ?? '');
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const mq = matchMedia(query);
+    const update = () => setMatches(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+}
+
+export function Findings({ report, firstSeen, scanId, targetId, selectedId, query, tickets, integrations, onSelect, onQuery, onTicketsChange }: Props) {
+  const decision: Decision | 'all' = DECISIONS.includes(query.decision as Decision) ? (query.decision as Decision) : 'all';
+  const tier: ReachTier | 'all' = TIERS.includes(query.tier as ReachTier) ? (query.tier as ReachTier) : 'all';
+  const q = query.q ?? '';
+  const setFilter = (patch: Record<string, string>, replace = false) => onQuery({ ...query, ...patch }, replace);
   const [bulk, setBulk] = useState<string | null>(null);
-  useEffect(() => { if (query.decision) setDecision(query.decision as Decision); }, [query.decision]);
-  useEffect(() => { if (query.tier) setTier(query.tier as ReachTier); }, [query.tier]);
+  const phone = useMediaQuery(PHONE);
 
   const kinds = (['github', 'jira'] as TicketKind[]).filter((k) => integrations[k]);
   const actionableWithout = (kind: TicketKind) => report.findings.filter((f) => (f.decision === 'Act' || f.decision === 'Attend') && !tickets[f.id]?.some((t) => t.kind === kind));
@@ -60,17 +80,17 @@ export function Findings({ report, scanId, targetId, selectedId, query, tickets,
   return (
     <div className="stack">
       <div className="filters" role="group" aria-label="Filters">
-        <button type="button" className="chip" aria-pressed={decision === 'all'} onClick={() => setDecision('all')}>All <span className="n">{report.findings.length}</span></button>
+        <button type="button" className="chip" aria-pressed={decision === 'all'} onClick={() => setFilter({ decision: '' })}>All <span className="n">{report.findings.length}</span></button>
         {DECISIONS.map((d) => (
-          <button key={d} type="button" className={`chip d-${DECISION_META[d].cls}`} aria-pressed={decision === d} onClick={() => setDecision(decision === d ? 'all' : d)} title={DECISION_META[d].help}>
+          <button key={d} type="button" className={`chip d-${DECISION_META[d].cls}`} aria-pressed={decision === d} onClick={() => setFilter({ decision: decision === d ? '' : d })} title={DECISION_META[d].help}>
             <span aria-hidden="true">{DECISION_META[d].icon}</span> {DECISION_META[d].short} <span className="n">{report.summary.byDecision[d]}</span>
           </button>
         ))}
-        <select aria-label="Reachability" value={tier} onChange={(e) => setTier(e.target.value as ReachTier | 'all')}>
+        <select aria-label="Reachability" value={tier} onChange={(e) => setFilter({ tier: e.target.value === 'all' ? '' : e.target.value })}>
           <option value="all">Any reachability</option>
           {TIERS.map((t) => <option key={t} value={t}>{TIER_SHORT[t]} ({report.summary.byTier[t]})</option>)}
         </select>
-        <input type="search" placeholder="Search package, CVE, route…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search findings" />
+        <input type="search" placeholder="Search package, CVE, route…" value={q} onChange={(e) => setFilter({ q: e.target.value }, true)} aria-label="Search findings" />
         <a className="btn small" href={api.vexUrl(scanId)} download><I.download /> VEX</a>
         {kinds.map((k) => {
           const n = actionableWithout(k).length;
@@ -80,33 +100,57 @@ export function Findings({ report, scanId, targetId, selectedId, query, tickets,
       {bulk && <div className="banner" role="status">{bulk} <button type="button" className="btn ghost small" onClick={() => setBulk(null)} aria-label="Dismiss"><I.close /></button></div>}
 
       <div className={`workbench ${selected ? 'with-detail' : ''}`}>
-        <div className="card table-wrap">
-          <table className="tbl queue">
-            <thead>
-              <tr><th>Decision</th><th className="num">Score</th><th>Component</th><th>Advisory</th><th className="hide-sm">Severity</th><th className="hide-sm">Reach</th><th className="hide-sm">Entry point</th><th className="hide-sm">Fix</th><th className="hide-sm">Ticket</th></tr>
-            </thead>
-            <tbody>
-              {rows.map((f) => {
-                const sev = severity(f);
-                return (
-                  <tr key={f.id} className="row" aria-selected={selected?.id === f.id} onClick={() => onSelect(f.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(f.id); } }}>
-                    <td><DecisionBadge decision={f.decision} short /></td>
-                    <td className="num">{f.score}</td>
-                    <td className="pkg">{f.component.name}<span className="muted">@{f.component.version}</span></td>
-                    <td>{advisoryName(f)}<div className="muted small">{f.advisory.summary}</div></td>
-                    <td className="hide-sm"><span className={`sev ${sev.cls}`}>{sev.label}</span></td>
-                    <td className="hide-sm">{TIER_SHORT[f.reach.tier]}</td>
-                    <td className="hide-sm mono small">{entryLabel(f) ?? <span className="muted">—</span>}</td>
-                    <td className="hide-sm">{f.advisory.fixedVersion ? `→ ${f.advisory.fixedVersion}` : <span className="muted">no fix</span>}</td>
-                    <td className="hide-sm">{(tickets[f.id] ?? []).map((t) => <a key={t.kind} className="ticket-link" href={t.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{t.key}</a>)}</td>
-                  </tr>
-                );
-              })}
-              {!rows.length && <tr><td colSpan={9} className="empty">Nothing matches these filters.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-        {selected && <Detail f={selected} scanId={scanId} targetId={targetId} targetName={report.target.name ?? report.target.dir} tickets={tickets[selected.id] ?? []} kinds={kinds} onTicketsChange={onTicketsChange} onClose={() => onSelect(undefined)} />}
+        {phone ? (
+          <ul className="queue-cards" aria-label="Findings">
+            {rows.map((f) => {
+              const sev = severity(f);
+              return (
+                <li key={f.id}>
+                  <button type="button" className="qcard" aria-pressed={selected?.id === f.id} onClick={() => onSelect(f.id)}>
+                    <span className="qcard-top"><DecisionBadge decision={f.decision} short /><span className="qcard-pkg">{f.component.name}<span className="muted">@{f.component.version}</span></span></span>
+                    <span className="qcard-score" aria-label={`Score ${f.score}`}>{f.score}</span>
+                    <span className="qcard-adv">{advisoryName(f)}<span className="muted">{f.advisory.summary}</span></span>
+                    <span className="qcard-meta">
+                      <span className={`sev ${sev.cls}`}>{sev.label}</span>
+                      <span>{TIER_SHORT[f.reach.tier]}</span>
+                      {f.advisory.fixedVersion ? <span className="qcard-fix">→ {f.advisory.fixedVersion}</span> : <span className="muted">no fix</span>}
+                      {(tickets[f.id] ?? []).map((t) => <span key={t.kind} className="ticket-link">{t.key}</span>)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {!rows.length && <li className="empty">Nothing matches these filters.</li>}
+          </ul>
+        ) : (
+          <div className="card table-wrap">
+            <table className="tbl queue">
+              <thead>
+                <tr><th>Decision</th><th className="num">Score</th><th>Component</th><th>Advisory</th><th>Severity</th><th>Reach</th><th>Entry point</th><th>Fix</th><th>Ticket</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((f) => {
+                  const sev = severity(f);
+                  return (
+                    <tr key={f.id} className="row" aria-selected={selected?.id === f.id} onClick={() => onSelect(f.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(f.id); } }}>
+                      <td><DecisionBadge decision={f.decision} short /></td>
+                      <td className="num">{f.score}</td>
+                      <td className="pkg">{f.component.name}<span className="muted">@{f.component.version}</span></td>
+                      <td>{advisoryName(f)}<div className="muted small">{f.advisory.summary}</div></td>
+                      <td><span className={`sev ${sev.cls}`}>{sev.label}</span></td>
+                      <td>{TIER_SHORT[f.reach.tier]}</td>
+                      <td className="mono small">{entryLabel(f) ?? <span className="muted">—</span>}</td>
+                      <td>{f.advisory.fixedVersion ? `→ ${f.advisory.fixedVersion}` : <span className="muted">no fix</span>}</td>
+                      <td>{(tickets[f.id] ?? []).map((t) => <a key={t.kind} className="ticket-link" href={t.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{t.key}</a>)}</td>
+                    </tr>
+                  );
+                })}
+                {!rows.length && <tr><td colSpan={9} className="empty">Nothing matches these filters.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {selected && <Detail f={selected} firstSeenAt={firstSeen[selected.id]} scanId={scanId} targetId={targetId} targetName={report.target.name ?? report.target.dir} tickets={tickets[selected.id] ?? []} kinds={kinds} onTicketsChange={onTicketsChange} onClose={() => onSelect(undefined)} />}
       </div>
     </div>
   );
@@ -126,10 +170,64 @@ function shortCommit(url: string): string {
   return url.replace(/^https?:\/\/github\.com\//, '');
 }
 
-function Detail({ f, scanId, targetId, targetName, tickets, kinds, onTicketsChange, onClose }: { f: Finding; scanId: number; targetId: number; targetName: string; tickets: { kind: TicketKind; key: string; url: string }[]; kinds: TicketKind[]; onTicketsChange: () => void; onClose: () => void }) {
+interface DetailProps {
+  f: Finding;
+  firstSeenAt?: string;
+  scanId: number;
+  targetId: number;
+  targetName: string;
+  tickets: { kind: TicketKind; key: string; url: string }[];
+  kinds: TicketKind[];
+  onTicketsChange: () => void;
+  onClose: () => void;
+}
+
+/**
+ * The list row is enough to draw the panel; the full finding (advisory text, every reference)
+ * is fetched when it opens. Below 1100 px the panel is a full-height sheet: focus moves to
+ * Close, Escape and the backdrop close it, and focus returns to the row afterwards.
+ */
+function Detail({ f, firstSeenAt, scanId, targetId, targetName, tickets, kinds, onTicketsChange, onClose }: DetailProps) {
   const [copied, setCopied] = useState<string | null>(null);
   const [creating, setCreating] = useState<TicketKind | null>(null);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [full, setFull] = useState<FullFinding | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const sheet = useMediaQuery(SHEET);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    setFull(null);
+    setLoadError(null);
+    const ac = new AbortController();
+    api.finding(scanId, f.id, ac.signal).then(setFull).catch((e) => { if (!ac.signal.aborted) setLoadError(e instanceof Error ? e.message : String(e)); });
+    return () => ac.abort();
+  }, [scanId, f.id]);
+
+  useEffect(() => {
+    if (!sheet) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+      if (opener && opener.isConnected) opener.focus();
+    };
+  }, [sheet, f.id]);
+
   const createOne = async (kind: TicketKind) => {
     setCreating(kind);
     setTicketError(null);
@@ -153,85 +251,102 @@ function Detail({ f, scanId, targetId, targetName, tickets, kinds, onTicketsChan
       setCopied('failed');
     }
   };
-  const cmd = fixCommand(f);
-  const path = bestPath(f);
-  const sev = severity(f);
+  const data: Finding = full ?? f;
+  const cmd = fixCommand(data);
+  const path = bestPath(data);
+  const sev = severity(data);
+  const title = `${f.component.name}@${f.component.version} · ${advisoryName(f)}`;
+  const references = data.advisory.references ?? [];
 
   return (
-    <aside className="card detail" aria-label="Finding detail">
-      <div className="detail-head">
-        <div>
-          <DecisionBadge decision={f.decision} short />
-          <div className="detail-title">{f.component.name}@{f.component.version} · {advisoryName(f)}</div>
-          <div className="detail-sub">{f.advisory.summary} · <span className={`sev ${sev.cls}`}>{sev.label}</span>{f.advisory.cvssScore !== undefined && ` CVSS ${f.advisory.cvssScore.toFixed(1)}`} · score {f.score}</div>
+    <>
+      {sheet && <div className="sheet-backdrop" onClick={() => onCloseRef.current()} role="presentation" />}
+      <aside className="card detail" role={sheet ? 'dialog' : undefined} aria-modal={sheet || undefined} aria-label={title}>
+        <div className="detail-head">
+          <div>
+            <DecisionBadge decision={f.decision} short />
+            <div className="detail-title">{title}</div>
+            <div className="detail-sub">{f.advisory.summary} · <span className={`sev ${sev.cls}`}>{sev.label}</span>{f.advisory.cvssScore !== undefined && ` CVSS ${f.advisory.cvssScore.toFixed(1)}`} · score {f.score}{firstSeenAt && <span className="first-seen"> · first seen {shortDate(firstSeenAt)}</span>}</div>
+          </div>
+          <button ref={closeRef} type="button" className="btn ghost icon" onClick={onClose} aria-label="Close"><I.close /></button>
         </div>
-        <button type="button" className="btn ghost icon" onClick={onClose} aria-label="Close"><I.close /></button>
-      </div>
 
-      <section>
-        <h3>Why</h3>
-        <ul className="why">{f.why.map((w, i) => <li key={i}>{w}</li>)}</ul>
-      </section>
-
-      <section>
-        <h3>Reachability · {TIER_LABEL[f.reach.tier]} · confidence {f.reach.confidence}</h3>
-        {path ? <PathDiagram path={path} pkg={f.component.name} /> : f.reach.callSites.length ? (
-          <ul className="refs">{f.reach.callSites.map((c, i) => <li key={i}><code>{c.text}()</code> at {c.file}:{c.line}</li>)}</ul>
-        ) : (
-          <p className="empty">{f.reach.tier === 'image-only' ? `Present in ${f.component.image ?? 'the container image'}${f.component.path && f.component.path !== f.component.name ? ` as ${(f.component.paths ?? [f.component.path]).join(', ')}` : ''}; the application code does not import it and NextFix does not trace code paths inside images.` : f.reach.importedIn.length ? `Imported in ${f.reach.importedIn.join(', ')}.` : 'Not imported by any source file.'}</p>
-        )}
-        {f.reach.paths.length > 1 && <p className="empty">{f.reach.paths.length} entry points reach this call, {f.reach.paths.filter((p) => p.userInput).length} carrying request data; the worst case is shown.</p>}
-      </section>
-
-      {f.symbols && (
         <section>
-          <h3>Function data · {f.symbols.source}{f.symbols.reviewed ? ' · reviewed' : ''}</h3>
-          <p className="small">
-            Vulnerable function{f.symbols.symbols.length === 1 ? '' : 's'}: <code>{f.symbols.symbols.join(', ')}</code>
-            {f.symbols.receiver && <span className="muted"> on {f.symbols.receiver}</span>}
-          </p>
-          {f.symbols.evidence ? (
-            <p className="small muted">
-              Derived from the fix commit <SafeLink href={f.symbols.evidence.commits[0]}>{shortCommit(f.symbols.evidence.commits[0] ?? '')}</SafeLink>, which changed <code>{f.symbols.evidence.changedFunctions.join(', ')}</code> in {f.symbols.evidence.files.join(', ')}.
-              {!f.symbols.evidence.repoMatch && ' The fix repository name does not match the package; check it.'}
-              {' '}Review with <code>nextfix symbols confirm {f.advisory.id} {f.component.name}</code>.
-            </p>
+          <h3>Why</h3>
+          <ul className="why">{data.why.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        </section>
+
+        <section>
+          <h3>Reachability · {TIER_LABEL[data.reach.tier]} · confidence {data.reach.confidence}</h3>
+          {path ? <PathDiagram path={path} pkg={data.component.name} /> : data.reach.callSites.length ? (
+            <ul className="refs">{data.reach.callSites.map((c, i) => <li key={i}><code>{c.text}()</code> at {c.file}:{c.line}</li>)}</ul>
           ) : (
-            <p className="small muted">Hand-curated from the advisory{f.symbols.references?.[0] ? <> (<SafeLink href={f.symbols.references[0]}>source</SafeLink>)</> : null}.</p>
+            <p className="empty">{data.reach.tier === 'image-only' ? `Present in ${data.component.image ?? 'the container image'}${data.component.path && data.component.path !== data.component.name ? ` as ${(data.component.paths ?? [data.component.path]).join(', ')}` : ''}; the application code does not import it and NextFix does not trace code paths inside images.` : data.reach.importedIn.length ? `Imported in ${data.reach.importedIn.join(', ')}.` : 'Not imported by any source file.'}</p>
           )}
+          {data.reach.paths.length > 1 && <p className="empty">{data.reach.paths.length} entry points reach this call, {data.reach.paths.filter((p) => p.userInput).length} carrying request data; the worst case is shown.</p>}
         </section>
-      )}
 
-      <section>
-        <h3>Fix</h3>
-        <div className="fixbox">
-          {f.fix ?? 'No fixed version is published yet. Mitigate at the entry point and re-check on the next scan.'}
-          {cmd && <code>{cmd}</code>}
-        </div>
-        <div className="actions">
-          {cmd && <button type="button" className="btn small" onClick={() => copy('cmd', cmd)}>{copied === 'cmd' ? <><I.check /> Copied</> : 'Copy command'}</button>}
-          <button type="button" className="btn small primary" onClick={() => copy('ticket', ticketMarkdown(f, targetName))}>{copied === 'ticket' ? <><I.check /> Copied</> : 'Copy as ticket'}</button>
-          {kinds.map((k) => {
-            const t = tickets.find((x) => x.kind === k);
-            return t ? (
-              <a key={k} className="btn small" href={t.url} target="_blank" rel="noreferrer"><I.check /> {KIND_LABEL[k]} {t.key}</a>
+        {data.symbols && (
+          <section>
+            <h3>Function data · {data.symbols.source}{data.symbols.reviewed ? ' · reviewed' : ''}</h3>
+            <p className="small">
+              Vulnerable function{data.symbols.symbols.length === 1 ? '' : 's'}: <code>{data.symbols.symbols.join(', ')}</code>
+              {data.symbols.receiver && <span className="muted"> on {data.symbols.receiver}</span>}
+            </p>
+            {data.symbols.evidence ? (
+              <p className="small muted">
+                Derived from the fix commit <SafeLink href={data.symbols.evidence.commits[0]}>{shortCommit(data.symbols.evidence.commits[0] ?? '')}</SafeLink>, which changed <code>{data.symbols.evidence.changedFunctions.join(', ')}</code> in {data.symbols.evidence.files.join(', ')}.
+                {!data.symbols.evidence.repoMatch && ' The fix repository name does not match the package; check it.'}
+                {' '}Review with <code>nextfix symbols confirm {data.advisory.id} {data.component.name}</code>.
+              </p>
             ) : (
-              <button key={k} type="button" className="btn small" disabled={creating !== null} onClick={() => createOne(k)}>{creating === k ? 'Creating…' : `Create ${KIND_LABEL[k]}`}</button>
-            );
-          })}
-          <a className="btn small" href={api.vexUrl(scanId)} download><I.download /> VEX</a>
-          {copied === 'failed' && <span className="error">Clipboard blocked by the browser.</span>}
-          {ticketError && <span className="error">{ticketError}</span>}
-        </div>
-        {!kinds.length && <p className="hint">Connect GitHub Issues or Jira under Settings → Integrations to create tickets from here.</p>}
-      </section>
+              <p className="small muted">Hand-curated from the advisory{data.symbols.references?.[0] ? <> (<SafeLink href={data.symbols.references[0]}>source</SafeLink>)</> : null}.</p>
+            )}
+          </section>
+        )}
 
-      {f.advisory.references.length > 0 && (
         <section>
-          <h3>References</h3>
-          <ul className="refs">{f.advisory.references.slice(0, 6).map((r) => <li key={r}><SafeLink href={r}>{r}</SafeLink></li>)}</ul>
+          <h3>Fix</h3>
+          <div className="fixbox">
+            {data.fix ?? 'No fixed version is published yet. Mitigate at the entry point and re-check on the next scan.'}
+            {cmd && <code>{cmd}</code>}
+          </div>
+          <div className="actions">
+            {cmd && <button type="button" className="btn small" onClick={() => copy('cmd', cmd)}>{copied === 'cmd' ? <><I.check /> Copied</> : 'Copy command'}</button>}
+            <button type="button" className="btn small primary" onClick={() => copy('ticket', ticketMarkdown(data, targetName))}>{copied === 'ticket' ? <><I.check /> Copied</> : 'Copy as ticket'}</button>
+            {kinds.map((k) => {
+              const t = tickets.find((x) => x.kind === k);
+              return t ? (
+                <a key={k} className="btn small" href={t.url} target="_blank" rel="noreferrer"><I.check /> {KIND_LABEL[k]} {t.key}</a>
+              ) : (
+                <button key={k} type="button" className="btn small" disabled={creating !== null} onClick={() => createOne(k)}>{creating === k ? 'Creating…' : `Create ${KIND_LABEL[k]}`}</button>
+              );
+            })}
+            <a className="btn small" href={api.vexUrl(scanId)} download><I.download /> VEX</a>
+            {copied === 'failed' && <span className="error">Clipboard blocked by the browser.</span>}
+            {ticketError && <span className="error">{ticketError}</span>}
+          </div>
+          {!kinds.length && <p className="hint">Connect GitHub Issues or Jira under Settings → Integrations to create tickets from here.</p>}
         </section>
-      )}
-    </aside>
+
+        {full?.advisory.details && (
+          <section>
+            <h3>Advisory</h3>
+            <details>
+              <summary>Show the advisory text</summary>
+              <p className="detail-text">{full.advisory.details}</p>
+            </details>
+          </section>
+        )}
+
+        {references.length > 0 && (
+          <section>
+            <h3>References{!full && !loadError ? <span className="muted"> · loading</span> : null}</h3>
+            <ul className="refs">{references.map((r) => <li key={r}><SafeLink href={r}>{r}</SafeLink></li>)}</ul>
+            {loadError && <p className="hint">Could not load the full finding: {loadError}</p>}
+          </section>
+        )}
+      </aside>
+    </>
   );
 }

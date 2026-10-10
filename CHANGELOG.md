@@ -5,6 +5,64 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-10-10
+
+The experience release: the Overview answers an executive's questions instead of counting
+the same findings five ways, the dashboard works on a phone, and reachability is fast
+enough for monorepos.
+
+### Added
+- **Overview rebuilt, one question per panel.** A posture verdict (Exposed, Attention,
+  Contained, Clean) with its sentence and the rule behind it; the evidence funnel from every
+  advisory found to the ones reachable without a login with request data and exploitation
+  evidence, each step saying what it removed and why, with three ratios (need no action,
+  exposed surface, from the image); what changed since the previous scan as a bridge with
+  new, resolved and re-decided items named; the work queue (the four decisions, once);
+  ageing of open actionable findings against the SLA with median time to resolve; the
+  shortest path to green (upgrades ranked by findings closed, with the sentence "N upgrades
+  clear everything that needs action"); where an attacker gets in (entry points as tiles
+  sized by what they reach); why each decision (reachability × exploitation matrix); the
+  trend and the evidence list. "Print summary" produces a one-sheet report.
+- **Re-check exploit data.** Re-runs only the decision step with today's EPSS and KEV data,
+  without re-scanning, and lists findings that would change; nothing is stored until the
+  next scan. The same logic is at `POST /api/targets/:id/redecide`.
+- **Finding history.** First seen, last seen and resolved dates per finding across scans,
+  with age buckets, SLA breaches, median days to resolve and the last 30 days' flow at
+  `GET /api/targets/:id/history`. SLA days (Fix now 7, Fix next cycle 30) and scan retention
+  (50 per application) are editable in Settings and at `GET/PUT /api/settings`.
+- **Scan progress and cancel.** The banner shows the stage and elapsed time with a Cancel
+  button; `GET /api/scan/progress`, `DELETE /api/scan`, and `scanning` in the health
+  endpoint. A scan started elsewhere is picked up when the tab regains focus.
+- **Phone layout.** Below 760 px the findings queue is a card per finding; below 1100 px the
+  detail is a full-height scrollable sheet with focus management; the tab strip shows an
+  overflow fade; a skip link.
+- Filters live in the URL (`#/findings?decision=Act&tier=reachable&q=lodash`), so reload,
+  share and Back keep them. The full finding (advisory text, every reference) is fetched
+  when opened; the list payload is lighter and gzip-compressed.
+- Export filenames carry the local date and time.
+
+### Changed
+- **Reachability is up to 170× faster.** One backwards pass from the vulnerable calls to the
+  handlers that can reach them, then a single shared request-data search with parent
+  pointers; 3.5 s per advisory became under 30 ms on a 1,500-file project, with identical
+  results and shortest paths shown.
+- The diff compares tier, decision, fix, request data, KEV, EPSS and entry points, and
+  explains each change ("entered KEV", "fix published 4.18.0").
+- "Match OS" follows the operating system's theme. Text colours in both themes meet WCAG AA
+  (amber, green and cyan darkened for light; button and small red text adjusted for dark).
+- Reports written before 0.8 show zeros for tiers they predate. Old-scan rows no longer break
+  the reachability filter.
+- `summary.advisories` counts distinct advisories.
+- Trend axis shows the time of day when several scans share a day; "seven tiers" in How it
+  works; the Reports column is "No action needed"; Evidence's first chip is "All evidence".
+
+### Fixed
+- Switching applications quickly can no longer show one application's report under another's
+  name; a diff failure no longer hides a loaded report; a malformed URL no longer blanks the
+  page (an error boundary offers Reload).
+- Modal dialogs move focus in, trap Tab, restore focus and close on Escape.
+- Settings no longer discards typed integration values on refetch.
+
 ## [0.8.1] — 2026-10-10
 
 A hardening release: the local server no longer trusts the network it sits on, the analyzer

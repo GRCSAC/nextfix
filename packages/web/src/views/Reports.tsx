@@ -20,7 +20,7 @@ export function Reports({ report, scans, scanId }: { report: ScanReport; scans: 
           <h2>Scan history</h2>
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>When</th><th className="num">Findings</th><th className="num">Fix now</th><th className="num">Next cycle</th><th className="num">Set aside</th><th>Version</th></tr></thead>
+              <thead><tr><th>When</th><th className="num">Findings</th><th className="num">Fix now</th><th className="num">Next cycle</th><th className="num">No action needed</th><th>NextFix</th></tr></thead>
               <tbody>
                 {[...scans].reverse().map((s) => (
                   <tr key={s.id} className={s.id === scanId ? 'current' : ''}>

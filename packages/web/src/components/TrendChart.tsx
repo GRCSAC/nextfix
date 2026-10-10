@@ -6,6 +6,13 @@ const W = 640;
 const H = 200;
 const PAD = { l: 30, r: 26, t: 10, b: 26 };
 
+/** Date labels, or time of day when more than one scan shares a day, so the axis never repeats itself. */
+function axisLabel(iso: string, all: string[]): string {
+  const day = (s: string) => shortDate(s);
+  const sameDay = all.filter((t) => day(t) === day(iso)).length > 1;
+  return sameDay ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : day(iso);
+}
+
 /** Act and Attend counts per scan: two status series, direct-labelled at the end, legend on top. */
 export function TrendChart({ scans }: { scans: ScanMeta[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -46,7 +53,7 @@ export function TrendChart({ scans }: { scans: ScanMeta[] }) {
           </g>
         ))}
         {pts.map((p, i) => (i % labelEvery === 0 || i === pts.length - 1) && (
-          <text key={p.t} x={x(i)} y={H - 6} fontSize="11" fill="var(--muted)" textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}>{shortDate(p.t)}</text>
+          <text key={p.t} x={x(i)} y={H - 6} fontSize="11" fill="var(--muted)" textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}>{axisLabel(p.t, pts.map((q) => q.t))}</text>
         ))}
         {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={PAD.t} y2={y(0)} stroke="var(--axis)" strokeWidth="1" />}
         {series.map((s) => (

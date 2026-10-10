@@ -1,0 +1,39 @@
+/* Skip link, scan banner, phone queue cards, detail sheet and the scan-history settings form. */
+
+.skip-link { position: absolute; left: 8px; top: -60px; z-index: 100; background: var(--btn-primary); color: #fff; padding: 8px 12px; border-radius: 8px; text-decoration: none; font-weight: 600; }
+.skip-link:focus { top: 8px; outline: 2px solid var(--ink); outline-offset: 2px; }
+main:focus { outline: none; }
+
+/* ---------- scan banner ---------- */
+.banner .grow { min-width: 0; }
+.banner-stage { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.banner > .btn { margin-left: auto; }
+
+/* ---------- settings: scan history ---------- */
+.grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 900px) { .grid.three { grid-template-columns: 1fr; } }
+.history-form { margin-top: 12px; }
+.history-form .field .hint { font-size: 0.78rem; }
+.history-form input[type="number"] { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; width: 100%; }
+.history-form input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- findings queue as cards (phones) ---------- */
+.queue-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.queue-cards .empty { padding: 10px 4px; }
+.qcard { width: 100%; text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; color: var(--ink); font: inherit; }
+.qcard[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-wash); }
+.qcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.qcard-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.qcard-pkg { font-weight: 600; overflow-wrap: anywhere; }
+.qcard-score { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink-2); }
+.qcard-adv { grid-column: 1 / -1; font-size: 0.88rem; min-width: 0; }
+.qcard-adv .muted { display: block; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qcard-meta { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 0.82rem; color: var(--ink-2); }
+.qcard-fix { font-family: var(--mono); font-size: 0.8rem; }
+
+/* ---------- detail sheet (below 1100 px the panel covers the page) ---------- */
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(2, 6, 23, 0.5); z-index: 29; }
+.detail-text { white-space: pre-wrap; font-size: 0.86rem; color: var(--ink-2); margin-top: 6px; overflow-wrap: anywhere; }
+.detail details > summary { cursor: pointer; font-size: 0.86rem; color: var(--accent); }
+.detail details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.first-seen { color: var(--muted); }
