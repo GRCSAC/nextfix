@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type Health, type ScanDiff, type ScanMeta, type ScanReport, type Target } from './api.ts';
+import { api, type Health, type Integrations, type ScanDiff, type ScanMeta, type ScanReport, type Target, type TicketMap } from './api.ts';
 import { I, Wordmark } from './components/Icons.tsx';
 import { Overview } from './views/Overview.tsx';
 import { Findings } from './views/Findings.tsx';
@@ -66,7 +66,17 @@ export function App() {
     return list;
   }, []);
 
+  const [tickets, setTickets] = useState<TicketMap>({});
+  const [integrations, setIntegrations] = useState<Integrations>({});
+  const loadTickets = useCallback(async (id: number) => {
+    setTickets(await api.tickets(id).catch(() => ({})));
+  }, []);
+  const loadIntegrations = useCallback(async () => {
+    setIntegrations(await api.integrations().catch(() => ({})));
+  }, []);
+
   const loadTarget = useCallback(async (id: number) => {
+    await loadTickets(id);
     const list = await api.scans(id);
     setScans(list);
     const last = list[list.length - 1];
@@ -82,6 +92,7 @@ export function App() {
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => {});
+    loadIntegrations();
     loadTargets().then((list) => {
       const chosen = list.find((t) => t.id === targetId) ?? list[0];
       if (chosen) {
@@ -203,7 +214,7 @@ export function App() {
               <Apps targets={targets} currentId={targetId} busy={!!busy} onSelect={selectTarget} onAdd={addTarget} onRemove={removeTarget} />
             )
           ) : route.page === 'settings' ? (
-            <Settings theme={theme} onTheme={setTheme} health={health} />
+            <Settings theme={theme} onTheme={setTheme} health={health} onIntegrationsChange={loadIntegrations} />
           ) : !report || !lastScan ? (
             <div className="hero">
               <h1>{current.name ?? current.dir}</h1>
@@ -227,7 +238,7 @@ export function App() {
                 <button type="button" className="btn primary" onClick={rescan} disabled={!!busy}><I.refresh /> {busy ? 'Scanning…' : 'Scan again'}</button>
               </div>
               {route.page === 'overview' && <Overview report={report} scans={scans} diff={diff} go={go} />}
-              {route.page === 'findings' && <Findings report={report} scanId={lastScan.id} selectedId={route.id} query={route.query} onSelect={(id) => go('findings', id, route.query)} />}
+              {route.page === 'findings' && <Findings report={report} scanId={lastScan.id} targetId={current.id} selectedId={route.id} query={route.query} tickets={tickets} integrations={integrations} onSelect={(id) => go('findings', id, route.query)} onTicketsChange={() => loadTickets(current.id)} />}
               {route.page === 'components' && <Components report={report} go={go} />}
               {route.page === 'evidence' && <Evidence report={report} scanId={lastScan.id} query={route.query} go={go} />}
               {route.page === 'reports' && <Reports report={report} scans={scans} scanId={lastScan.id} />}

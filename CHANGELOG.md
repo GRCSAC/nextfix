@@ -5,6 +5,23 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-09
+
+### Added
+- **GitHub Issues and Jira Cloud export.** Settings → Integrations takes a repository and
+  token (GitHub) or site, email, API token and project key (Jira), with Save-and-test.
+  Credentials live only in the local NextFix database and are never returned by the API.
+  A finding's detail gains "Create GitHub issue" / "Create Jira issue"; the queue gains
+  "… issues for actionable" to create one for every Fix now and Fix next cycle finding that
+  has none. Created issues are remembered per finding (no duplicates on retry) and linked
+  from the queue and the detail. The issue body is the same Markdown as "Copy as ticket",
+  converted to Atlassian Document Format for Jira.
+- GitHub Enterprise: an optional API base for the GitHub integration.
+
+### Changed
+- The ticket text lives in the engine (`report/ticket.ts`) so the CLI, server and dashboard
+  share one format.
+
 ## [0.6.0] — 2026-10-09
 
 ### Added

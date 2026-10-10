@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.6.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.7.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -33,7 +33,8 @@ Enter a project folder on the welcome screen. NextFix scans it and keeps the his
   function (showing where request data enters), the upgrade command, copy-as-ticket, and
   VEX download.
 - **Components**, **Evidence** (every set-aside with its VEX justification), **Reports**
-  (exports and scan history), **Apps** and **Settings**.
+  (exports and scan history), **Apps** and **Settings** (theme, GitHub Issues and Jira
+  integrations for one-click tickets).
 
 Dark by default, light and match-OS in Settings; works at phone width.
 
@@ -220,7 +221,7 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Server mode: SQLite history, trends, scan diff, JSON API | ✅ |
 | SSO (OIDC), RBAC, audit log, API tokens | ⬜ |
 | Container image inventory (Syft/Grype adapter) | ⬜ |
-| Jira / GitHub Issues export | ⬜ |
+| Jira / GitHub Issues export (per finding and bulk, links remembered) | ✅ |
 | Packaging: single executable + Docker image | ⬜ |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
@@ -228,7 +229,6 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 ## Parking lot
 
 - Executive one-page PDF export; scheduled re-scans; e-mail or Slack digest.
-- Jira / GitHub Issues push (copy-as-ticket covers it manually today).
 - NestJS and Hapi entry-point detection.
 - Framework objects beyond Express `res` (e.g. Next.js API routes, serverless handlers).
 - Import of a CycloneDX SBOM instead of a lockfile.

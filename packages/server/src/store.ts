@@ -49,7 +49,47 @@ export class Store {
         report TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS scans_target ON scans(target_id, created_at);
+      CREATE TABLE IF NOT EXISTS integrations (
+        kind TEXT PRIMARY KEY,
+        config TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS tickets (
+        target_id INTEGER NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+        finding_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        key TEXT NOT NULL,
+        url TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (target_id, finding_id, kind)
+      );
     `);
+  }
+
+  // ---- integrations (tracker credentials live only in this local database) ----
+  getIntegration<T>(kind: string): T | undefined {
+    const r = this.db.prepare('SELECT config FROM integrations WHERE kind = ?').get(kind) as { config: string } | undefined;
+    return r ? (JSON.parse(r.config) as T) : undefined;
+  }
+
+  setIntegration(kind: string, config: unknown): void {
+    this.db.prepare('INSERT INTO integrations (kind, config, updated_at) VALUES (?, ?, ?) ON CONFLICT(kind) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at').run(kind, JSON.stringify(config), new Date().toISOString());
+  }
+
+  deleteIntegration(kind: string): void {
+    this.db.prepare('DELETE FROM integrations WHERE kind = ?').run(kind);
+  }
+
+  // ---- tickets created for findings ----
+  listTickets(targetId: number): Record<string, { kind: string; key: string; url: string; createdAt: string }[]> {
+    const rows = this.db.prepare('SELECT finding_id, kind, key, url, created_at FROM tickets WHERE target_id = ? ORDER BY created_at').all(targetId) as { finding_id: string; kind: string; key: string; url: string; created_at: string }[];
+    const out: Record<string, { kind: string; key: string; url: string; createdAt: string }[]> = {};
+    for (const r of rows) (out[r.finding_id] ??= []).push({ kind: r.kind, key: r.key, url: r.url, createdAt: r.created_at });
+    return out;
+  }
+
+  addTicket(targetId: number, findingId: string, kind: string, key: string, url: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO tickets (target_id, finding_id, kind, key, url, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(targetId, findingId, kind, key, url, new Date().toISOString());
   }
 
   listTargets(): (TargetRow & { lastScan?: ScanRow })[] {
@@ -80,6 +120,7 @@ export class Store {
 
   deleteTarget(id: number): void {
     this.db.prepare('DELETE FROM scans WHERE target_id = ?').run(id);
+    this.db.prepare('DELETE FROM tickets WHERE target_id = ?').run(id);
     this.db.prepare('DELETE FROM targets WHERE id = ?').run(id);
   }
 

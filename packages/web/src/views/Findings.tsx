@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Decision, Finding, ReachTier, ScanReport } from '../api.ts';
+import type { Decision, Finding, Integrations, ReachTier, ScanReport, TicketKind, TicketMap } from '../api.ts';
 import { api } from '../api.ts';
 import { DecisionBadge } from '../components/DecisionBadge.tsx';
 import { PathDiagram } from '../components/PathDiagram.tsx';
@@ -9,17 +9,42 @@ import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, 
 interface Props {
   report: ScanReport;
   scanId: number;
+  targetId: number;
   selectedId?: string;
   query: Record<string, string>;
+  tickets: TicketMap;
+  integrations: Integrations;
   onSelect: (id?: string) => void;
+  onTicketsChange: () => void;
 }
 
-export function Findings({ report, scanId, selectedId, query, onSelect }: Props) {
+const KIND_LABEL: Record<TicketKind, string> = { github: 'GitHub issue', jira: 'Jira issue' };
+
+export function Findings({ report, scanId, targetId, selectedId, query, tickets, integrations, onSelect, onTicketsChange }: Props) {
   const [decision, setDecision] = useState<Decision | 'all'>((query.decision as Decision) || 'all');
   const [tier, setTier] = useState<ReachTier | 'all'>((query.tier as ReachTier) || 'all');
   const [q, setQ] = useState(query.q ?? '');
+  const [bulk, setBulk] = useState<string | null>(null);
   useEffect(() => { if (query.decision) setDecision(query.decision as Decision); }, [query.decision]);
   useEffect(() => { if (query.tier) setTier(query.tier as ReachTier); }, [query.tier]);
+
+  const kinds = (['github', 'jira'] as TicketKind[]).filter((k) => integrations[k]);
+  const actionableWithout = (kind: TicketKind) => report.findings.filter((f) => (f.decision === 'Act' || f.decision === 'Attend') && !tickets[f.id]?.some((t) => t.kind === kind));
+  const createBulk = async (kind: TicketKind) => {
+    const list = actionableWithout(kind);
+    if (!list.length) return;
+    if (!window.confirm(`Create ${list.length} ${KIND_LABEL[kind]}${list.length === 1 ? '' : 's'} for every Fix now and Fix next cycle finding without one?`)) return;
+    setBulk(`Creating ${list.length} ${KIND_LABEL[kind]}s…`);
+    try {
+      const r = await api.createTickets(targetId, scanId, kind, list.map((f) => f.id));
+      const ok = r.results.filter((x) => x.url && !x.skipped).length;
+      const failed = r.results.filter((x) => x.error);
+      setBulk(`${ok} created${failed.length ? `, ${failed.length} failed: ${failed[0]!.error}` : ''}`);
+      onTicketsChange();
+    } catch (e) {
+      setBulk(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -47,13 +72,18 @@ export function Findings({ report, scanId, selectedId, query, onSelect }: Props)
         </select>
         <input type="search" placeholder="Search package, CVE, route…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search findings" />
         <a className="btn small" href={api.vexUrl(scanId)} download><I.download /> VEX</a>
+        {kinds.map((k) => {
+          const n = actionableWithout(k).length;
+          return <button key={k} type="button" className="btn small" disabled={!n || !!bulk?.startsWith('Creating')} onClick={() => createBulk(k)} title={`Create a ${KIND_LABEL[k]} for every Fix now / Fix next cycle finding that has none`}>{KIND_LABEL[k]}s for actionable <span className="n">{n}</span></button>;
+        })}
       </div>
+      {bulk && <div className="banner" role="status">{bulk} <button type="button" className="btn ghost small" onClick={() => setBulk(null)} aria-label="Dismiss"><I.close /></button></div>}
 
       <div className={`workbench ${selected ? 'with-detail' : ''}`}>
         <div className="card table-wrap">
           <table className="tbl queue">
             <thead>
-              <tr><th>Decision</th><th className="num">Score</th><th>Component</th><th>Advisory</th><th className="hide-sm">Severity</th><th className="hide-sm">Reach</th><th className="hide-sm">Entry point</th><th className="hide-sm">Fix</th></tr>
+              <tr><th>Decision</th><th className="num">Score</th><th>Component</th><th>Advisory</th><th className="hide-sm">Severity</th><th className="hide-sm">Reach</th><th className="hide-sm">Entry point</th><th className="hide-sm">Fix</th><th className="hide-sm">Ticket</th></tr>
             </thead>
             <tbody>
               {rows.map((f) => {
@@ -68,14 +98,15 @@ export function Findings({ report, scanId, selectedId, query, onSelect }: Props)
                     <td className="hide-sm">{TIER_SHORT[f.reach.tier]}</td>
                     <td className="hide-sm mono small">{entryLabel(f) ?? <span className="muted">—</span>}</td>
                     <td className="hide-sm">{f.advisory.fixedVersion ? `→ ${f.advisory.fixedVersion}` : <span className="muted">no fix</span>}</td>
+                    <td className="hide-sm">{(tickets[f.id] ?? []).map((t) => <a key={t.kind} className="ticket-link" href={t.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{t.key}</a>)}</td>
                   </tr>
                 );
               })}
-              {!rows.length && <tr><td colSpan={8} className="empty">Nothing matches these filters.</td></tr>}
+              {!rows.length && <tr><td colSpan={9} className="empty">Nothing matches these filters.</td></tr>}
             </tbody>
           </table>
         </div>
-        {selected && <Detail f={selected} scanId={scanId} targetName={report.target.name ?? report.target.dir} onClose={() => onSelect(undefined)} />}
+        {selected && <Detail f={selected} scanId={scanId} targetId={targetId} targetName={report.target.name ?? report.target.dir} tickets={tickets[selected.id] ?? []} kinds={kinds} onTicketsChange={onTicketsChange} onClose={() => onSelect(undefined)} />}
       </div>
     </div>
   );
@@ -89,8 +120,24 @@ function shortCommit(url: string): string {
   return url.replace(/^https?:\/\/github\.com\//, '');
 }
 
-function Detail({ f, scanId, targetName, onClose }: { f: Finding; scanId: number; targetName: string; onClose: () => void }) {
+function Detail({ f, scanId, targetId, targetName, tickets, kinds, onTicketsChange, onClose }: { f: Finding; scanId: number; targetId: number; targetName: string; tickets: { kind: TicketKind; key: string; url: string }[]; kinds: TicketKind[]; onTicketsChange: () => void; onClose: () => void }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [creating, setCreating] = useState<TicketKind | null>(null);
+  const [ticketError, setTicketError] = useState<string | null>(null);
+  const createOne = async (kind: TicketKind) => {
+    setCreating(kind);
+    setTicketError(null);
+    try {
+      const r = await api.createTickets(targetId, scanId, kind, [f.id]);
+      const res = r.results[0];
+      if (res?.error) setTicketError(res.error);
+      onTicketsChange();
+    } catch (e) {
+      setTicketError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(null);
+    }
+  };
   const copy = async (what: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -158,9 +205,19 @@ function Detail({ f, scanId, targetName, onClose }: { f: Finding; scanId: number
         <div className="actions">
           {cmd && <button type="button" className="btn small" onClick={() => copy('cmd', cmd)}>{copied === 'cmd' ? <><I.check /> Copied</> : 'Copy command'}</button>}
           <button type="button" className="btn small primary" onClick={() => copy('ticket', ticketMarkdown(f, targetName))}>{copied === 'ticket' ? <><I.check /> Copied</> : 'Copy as ticket'}</button>
+          {kinds.map((k) => {
+            const t = tickets.find((x) => x.kind === k);
+            return t ? (
+              <a key={k} className="btn small" href={t.url} target="_blank" rel="noreferrer"><I.check /> {KIND_LABEL[k]} {t.key}</a>
+            ) : (
+              <button key={k} type="button" className="btn small" disabled={creating !== null} onClick={() => createOne(k)}>{creating === k ? 'Creating…' : `Create ${KIND_LABEL[k]}`}</button>
+            );
+          })}
           <a className="btn small" href={api.vexUrl(scanId)} download><I.download /> VEX</a>
           {copied === 'failed' && <span className="error">Clipboard blocked by the browser.</span>}
+          {ticketError && <span className="error">{ticketError}</span>}
         </div>
+        {!kinds.length && <p className="hint">Connect GitHub Issues or Jira under Settings → Integrations to create tickets from here.</p>}
       </section>
 
       {f.advisory.references.length > 0 && (

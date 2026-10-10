@@ -70,7 +70,7 @@ resource classes, Starlette-only apps, Tornado; method calls on framework object
 
 The repository opens once the five remaining feature-table items are done, in this order:
 
-1. Jira and GitHub Issues export (0.7)
+1. Jira and GitHub Issues export (0.7) — done 2026-10-09
 2. Container image inventory through a Syft/Grype adapter (0.8)
 3. Go via govulncheck (0.9)
 4. Team features: local accounts, roles, audit log, API tokens, OIDC (0.10)

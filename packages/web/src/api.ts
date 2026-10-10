@@ -26,6 +26,16 @@ export interface ScanDiff {
   changed: { finding: Finding; from: Decision; to: Decision }[];
 }
 
+export interface Integrations {
+  github?: { repo: string; labels: string[]; hasToken: boolean };
+  jira?: { baseUrl: string; email: string; projectKey: string; issueType: string; hasToken: boolean };
+}
+
+export type TicketKind = 'github' | 'jira';
+export interface Ticket { kind: TicketKind; key: string; url: string; createdAt: string }
+export type TicketMap = Record<string, Ticket[]>;
+export interface TicketResult { findingId: string; key?: string; url?: string; error?: string; skipped?: boolean }
+
 export interface Health {
   ok: boolean;
   version: string;
@@ -53,4 +63,10 @@ export const api = {
   diff: (scanId: number) => call<ScanDiff>(`/api/scans/${scanId}/diff`),
   vexUrl: (scanId: number) => `/api/scans/${scanId}/vex`,
   reportUrl: (scanId: number) => `/api/scans/${scanId}`,
+  integrations: () => call<Integrations>('/api/integrations'),
+  saveIntegration: (kind: TicketKind, config: Record<string, unknown>) => call<{ ok: boolean }>(`/api/integrations/${kind}`, { method: 'PUT', body: JSON.stringify(config) }),
+  removeIntegration: (kind: TicketKind) => call<void>(`/api/integrations/${kind}`, { method: 'DELETE' }),
+  testIntegration: (kind: TicketKind) => call<{ ok: boolean; message: string }>(`/api/integrations/${kind}/test`, { method: 'POST' }),
+  tickets: (targetId: number) => call<TicketMap>(`/api/targets/${targetId}/tickets`),
+  createTickets: (targetId: number, scanId: number, kind: TicketKind, findingIds: string[]) => call<{ results: TicketResult[] }>(`/api/targets/${targetId}/tickets`, { method: 'POST', body: JSON.stringify({ scanId, kind, findingIds }) }),
 };

@@ -1,8 +1,10 @@
 # Security policy
 
 NextFix reads source code and lockfiles on the machine it runs on. It makes outbound requests
-only to osv.dev, api.first.org (EPSS), cisa.gov (KEV) and, for symbol derivation, github.com
-and raw.githubusercontent.com. It never sends source code anywhere.
+only to osv.dev, api.first.org (EPSS), cisa.gov (KEV), github.com and raw.githubusercontent.com
+for symbol derivation, and the issue trackers you configure yourself. It never sends source
+code anywhere; a created ticket contains the finding's reasoning, file paths and line numbers.
+Tracker credentials are stored unencrypted in the local NextFix database.
 
 ## Reporting a vulnerability
 

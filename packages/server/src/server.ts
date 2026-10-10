@@ -7,6 +7,8 @@ import { toOpenVex } from '../../engine/src/report/vex.ts';
 import { toolVersion } from '../../engine/src/version.ts';
 import { defaultCachePath } from '../../engine/src/vulns/cache.ts';
 import { hasPythonProject } from '../../engine/src/inventory/python.ts';
+import { ticketMarkdown, ticketTitle } from '../../engine/src/report/ticket.ts';
+import { githubCreateIssue, githubTest, jiraCreateIssue, jiraTest, IntegrationError, type GitHubConfig, type JiraConfig } from './integrations.ts';
 import { Store } from './store.ts';
 import { diffReports } from './diff.ts';
 
@@ -108,6 +110,80 @@ export function createNextFixServer(opts: ServerOptions) {
       if (m === 'POST' && c === 'scan') return send(res, 201, await runScan(id));
       if (m === 'GET' && c === 'scans') return send(res, 200, opts.store.listScans(id));
     }
+    // ---- tracker integrations ----
+    if (a === 'integrations' && !b && m === 'GET') {
+      const gh = opts.store.getIntegration<GitHubConfig>('github');
+      const jira = opts.store.getIntegration<JiraConfig>('jira');
+      return send(res, 200, {
+        github: gh ? { repo: gh.repo, labels: gh.labels ?? [], hasToken: !!gh.token } : undefined,
+        jira: jira ? { baseUrl: jira.baseUrl, email: jira.email, projectKey: jira.projectKey, issueType: jira.issueType ?? 'Task', hasToken: !!jira.apiToken } : undefined,
+      });
+    }
+    if (a === 'integrations' && (b === 'github' || b === 'jira')) {
+      if (m === 'DELETE') {
+        opts.store.deleteIntegration(b);
+        return send(res, 204, '');
+      }
+      if (m === 'PUT') {
+        const body = await readJson<Record<string, unknown>>(req);
+        const existing = opts.store.getIntegration<Record<string, unknown>>(b) ?? {};
+        // A blank secret keeps the stored one.
+        const merged = { ...existing, ...body };
+        if (b === 'github' && !body.token) merged.token = existing.token;
+        if (b === 'jira' && !body.apiToken) merged.apiToken = existing.apiToken;
+        if (b === 'github' && typeof merged.labels === 'string') merged.labels = (merged.labels as string).split(',').map((s) => s.trim()).filter(Boolean);
+        opts.store.setIntegration(b, merged);
+        return send(res, 200, { ok: true });
+      }
+      if (m === 'POST' && c === 'test') {
+        const cfg = opts.store.getIntegration<GitHubConfig & JiraConfig>(b);
+        if (!cfg) throw new HttpError(400, 'Not configured yet');
+        try {
+          const msg = b === 'github' ? await githubTest(cfg) : await jiraTest(cfg);
+          return send(res, 200, { ok: true, message: msg });
+        } catch (err) {
+          throw new HttpError(err instanceof IntegrationError ? 400 : 500, err instanceof Error ? err.message : String(err));
+        }
+      }
+    }
+    if (a === 'targets' && b && c === 'tickets') {
+      const id = Number(b);
+      if (m === 'GET') return send(res, 200, opts.store.listTickets(id));
+      if (m === 'POST') {
+        const body = await readJson<{ scanId: number; findingIds: string[]; kind: 'github' | 'jira' }>(req);
+        const report = body.scanId ? opts.store.getReport(body.scanId) : undefined;
+        if (!report) throw new HttpError(404, 'Scan not found');
+        const cfg = opts.store.getIntegration<GitHubConfig & JiraConfig>(body.kind);
+        if (!cfg) throw new HttpError(400, `${body.kind === 'github' ? 'GitHub' : 'Jira'} is not configured (Settings → Integrations)`);
+        const existing = opts.store.listTickets(id);
+        const targetName = report.target.name ?? report.target.dir;
+        const results: { findingId: string; key?: string; url?: string; error?: string; skipped?: boolean }[] = [];
+        for (const fid of body.findingIds ?? []) {
+          const f = report.findings.find((x) => x.id === fid);
+          if (!f) {
+            results.push({ findingId: fid, error: 'finding not in this scan' });
+            continue;
+          }
+          const already = existing[fid]?.find((t) => t.kind === body.kind);
+          if (already) {
+            results.push({ findingId: fid, key: already.key, url: already.url, skipped: true });
+            continue;
+          }
+          try {
+            const title = ticketTitle(f);
+            const md = ticketMarkdown(f, targetName);
+            const t = body.kind === 'github' ? await githubCreateIssue(cfg, title, md) : await jiraCreateIssue(cfg, title, md);
+            opts.store.addTicket(id, fid, body.kind, t.key, t.url);
+            results.push({ findingId: fid, key: t.key, url: t.url });
+            log(`ticket: ${body.kind} ${t.key} for ${fid}`);
+          } catch (err) {
+            results.push({ findingId: fid, error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        return send(res, 200, { results });
+      }
+    }
+
     if (a === 'scans' && b) {
       const id = Number(b);
       const row = opts.store.getScan(id);
