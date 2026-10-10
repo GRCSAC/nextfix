@@ -52,7 +52,10 @@ Say "=== NextFix Windows release helper :: v$VER ==="
 $DistBin   = Join-Path $Root "dist-bin"
 $Exe       = Join-Path $DistBin "win32-x64\nextfix.exe"
 $Setup     = Join-Path $DistBin "NextFix-Setup-$VER.exe"
-$Sums      = Join-Path $DistBin "SHA256SUMS"
+# Named apart from the release workflow's SHA256SUMS (every platform) so an upload never replaces it.
+$Sums      = Join-Path $DistBin "SHA256SUMS.windows"
+# The signed executable under the name the release attaches, so it replaces the unsigned asset.
+$LooseExe  = Join-Path $DistBin "nextfix-$VER-win32-x64.exe"
 $Iss       = Join-Path $PSScriptRoot "nextfix.iss"
 $SignPs1   = Join-Path $PSScriptRoot "sign.ps1"
 $Refresh   = Join-Path $PSScriptRoot "refresh-manifests.mjs"
@@ -99,7 +102,7 @@ function Write-Sha256Sums {
   # slashes) so `sha256sum -c SHA256SUMS` works for anyone verifying a download. No BOM: a
   # BOM is a silent way to make every checksum tool reject the file.
   $lines = @()
-  foreach ($f in @($Setup, $Exe)) {
+  foreach ($f in @($Setup, $Exe, $LooseExe)) {
     $rel = $f.Substring($DistBin.Length + 1).Replace('\', '/')
     $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
     $lines += "$h  $rel"
@@ -128,6 +131,9 @@ function Invoke-Build {
 
   Say "--- sign nextfix.exe (before the installer is built from it) ---"
   Invoke-Sign $Exe
+  # A byte copy keeps the signature: this is the loose download, under the release's asset name.
+  Copy-Item $Exe $LooseExe -Force
+  Say "  copied signed exe to $LooseExe"
 
   Say "--- installer (Inno Setup) ---"
   $iscc = Find-Iscc
@@ -193,20 +199,20 @@ function Invoke-Check {
     }
   }
 
-  Say "--- SHA256SUMS ---"
+  Say "--- SHA256SUMS.windows ---"
   if (-not (Test-Path $Sums)) { Fail "dist-bin\SHA256SUMS missing (run -Build)" }
   else {
     $bytes = [IO.File]::ReadAllBytes($Sums)
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { Fail "SHA256SUMS has a UTF-8 BOM; checksum tools reject it" }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { Fail "SHA256SUMS.windows has a UTF-8 BOM; checksum tools reject it" }
     $listed = @{}
     foreach ($line in (Get-Content $Sums)) {
       if ($line -match '^([0-9a-f]{64})  (.+)$') { $listed[$Matches[2]] = $Matches[1] }
     }
-    foreach ($f in @($Setup, $Exe)) {
+    foreach ($f in @($Setup, $Exe, $LooseExe)) {
       $rel = $f.Substring($DistBin.Length + 1).Replace('\', '/')
       $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
-      if (-not $listed.ContainsKey($rel)) { Fail "SHA256SUMS has no entry for $rel" }
-      elseif ($listed[$rel] -ne $h) { Fail "SHA256SUMS entry for $rel does not match the file on disk (hash taken before signing?). Re-run -Build." }
+      if (-not $listed.ContainsKey($rel)) { Fail "SHA256SUMS.windows has no entry for $rel" }
+      elseif ($listed[$rel] -ne $h) { Fail "SHA256SUMS.windows entry for $rel does not match the file on disk (hash taken before signing?). Re-run -Build." }
       else { Pass "SHA256SUMS matches $rel" }
     }
   }
@@ -234,5 +240,5 @@ if ($warn.Count -gt 0) {
   Say "CHECK PASSED WITH WARNINGS: NOT RELEASABLE ($($warn.Count) unsigned artifact(s); rebuild without -SkipSign)"
   exit 0
 }
-Say "CHECK PASSED: dist-bin\NextFix-Setup-$VER.exe is signed, verified and described by SHA256SUMS and the manifests"
+Say "CHECK PASSED: dist-bin\NextFix-Setup-$VER.exe is signed, verified and described by SHA256SUMS.windows and the manifests"
 exit 0

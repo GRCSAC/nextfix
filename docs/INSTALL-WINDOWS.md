@@ -90,7 +90,7 @@ powershell -File packaging\windows\release.ps1 -Check  # re-run any time; must e
 `-Check` verifies independently of the build: both artifacts exist; `nextfix.exe --version`
 and the installer's VersionInfo (ProductVersion, FileVersion, CompanyName `GRCSAC`, ProductName)
 match `package.json`; the installer is newer than the exe; both signatures validate with subject
-`GRCSAC` and a timestamp; `SHA256SUMS` matches the files on disk and has no BOM; the winget and
+`GRCSAC` and a timestamp; `SHA256SUMS.windows` matches the files on disk and has no BOM; the winget and
 Chocolatey manifests carry the current version, URL and SHA256. Any mismatch is a `[FAIL]` and
 exit code 1.
 

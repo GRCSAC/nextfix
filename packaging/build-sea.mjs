@@ -35,6 +35,22 @@ function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
 }
 
+/** signtool.exe from the PATH or the newest installed Windows SDK. */
+function findSigntool() {
+  for (const dir of (process.env.PATH ?? '').split(';')) {
+    if (dir && existsSync(join(dir, 'signtool.exe'))) return join(dir, 'signtool.exe');
+  }
+  const kits = join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Windows Kits', '10', 'bin');
+  if (!existsSync(kits)) return undefined;
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const versions = readdirSync(kits).filter((n) => /^\d+\.\d+\.\d+\.\d+$/.test(n)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  for (const v of versions) {
+    const candidate = join(kits, v, arch, 'signtool.exe');
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 function mb(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
@@ -114,8 +130,15 @@ run(process.execPath, ['--experimental-sea-config', join(binDir, 'sea-config.jso
 
 copyFileSync(nodeBinary, exe);
 if (process.platform === 'darwin') run('codesign', ['--remove-signature', exe]);
-// Windows: the copied node.exe carries the Node.js project's signature, which stops matching
-// once the blob is injected; the installer's signing step replaces it. Nothing to do here.
+// Windows: the copied node.exe carries the Node.js project's signature. Injecting the blob
+// breaks it, and signtool refuses to sign over a broken signature (0x800700C1), so it is
+// stripped first; the release script signs the finished executable. Without a Windows SDK the
+// signature stays and only signing is affected, so a missing signtool is a warning, not an error.
+if (process.platform === 'win32') {
+  const signtool = findSigntool();
+  if (signtool) run(signtool, ['remove', '/s', exe]);
+  else console.warn('build-sea: signtool not found; the executable keeps Node\'s stale signature and cannot be re-signed until it is removed');
+}
 await inject(exe, 'NODE_SEA_BLOB', readFileSync(seaConfig.output), {
   sentinelFuse: 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2',
   machoSegmentName: process.platform === 'darwin' ? 'NODE_SEA' : undefined,
