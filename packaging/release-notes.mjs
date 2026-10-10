@@ -12,7 +12,11 @@ if (!version) {
 }
 const changelog = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'CHANGELOG.md'), 'utf8');
 const lines = changelog.split(/\r?\n/);
-const start = lines.findIndex((l) => /^## \[/.test(l) && l.includes(`[${version}]`));
+// A release candidate (1.0.0-rc.1) reuses the notes of the version it leads to.
+const base = version.replace(/-.*$/, '');
+const sectionFor = (v) => lines.findIndex((l) => /^## \[/.test(l) && l.includes(`[${v}]`));
+let start = sectionFor(version);
+if (start === -1) start = sectionFor(base);
 if (start === -1) {
   console.error(`CHANGELOG.md has no "## [${version}]" section`);
   process.exit(1);
