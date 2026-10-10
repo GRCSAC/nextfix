@@ -9,6 +9,7 @@ does not belong in this file.
 | Input | Source | Used for |
 |---|---|---|
 | Component (name, version, dev, direct) | lockfile | tiers `dev-only`, fix text |
+| Image components (ecosystem incl. distribution release, source package, binary packages) | syft over the image, or an SBOM file | tier `image-only`, OS-package fix text |
 | Advisory (CVSS v3 vector → score, fixed version) | OSV | severity, fix |
 | Vulnerable symbols for (advisory, package) | `data/vulnerable-symbols.json` | tiers 2–4 |
 | Imports, functions, calls | TypeScript parser over the project | call graph |
@@ -29,8 +30,13 @@ does not belong in this file.
 6. `reachable` — at least one entry point reaches a call. The first path found per entry point
    is recorded; an unauthenticated path is preferred for the decision.
 
+Before tier 1: a component found **only in the container image** (not in a lockfile, and for
+npm / PyPI not imported by any source file) is `image-only`. NextFix traces no code paths
+inside an image, so no claim of "unused" or "not called" is made; the package is simply
+present. An image package that the application does import is analysed like any other.
+
 **Confidence** travels with the tier: `confirmed` (curated symbols), `derived` (from the fix
-commit, automated), `package-level` (tiers 1–3).
+commit, automated), `package-level` (tiers 1–3 and `image-only`).
 
 ### How derived symbols are built
 
@@ -78,6 +84,7 @@ exposure standing in for "mission & well-being".
 |---|---|---|
 | dev-only, unused, imported-not-called | vulnerable code not in execute path | **Track** |
 | imported-unknown-symbol | exploitation ≠ none **or** CVSS ≥ 7 → Attend, else | **Track\*** |
+| image-only | exploitation = active, **or** (a fix exists **and** (exploitation = likely **or** CVSS ≥ 7)) → Attend, else | **Track\*** |
 | called-unreached | exploitation = active → Attend, else | **Track\*** |
 | reachable, unauthenticated | exploitation ≠ none **or** CVSS ≥ 9 **or** (user input **and** CVSS ≥ 7) → **Act**, else | **Attend** |
 | reachable, authenticated | exploitation = active → **Act**, else | **Attend** |
@@ -91,7 +98,7 @@ action, re-evaluate on change.
 ```
 base      = CVSS × 10 (5.0 × 10 if unknown)
 reach     = reachable 1.0 · called-unreached 0.55 · imported-unknown-symbol 0.6
-            · imported-not-called 0.2 · unused 0.1 · dev-only 0.05
+            · image-only 0.5 · imported-not-called 0.2 · unused 0.1 · dev-only 0.05
 auth      = reachable & authenticated → × 0.75
 local     = network local-only → × 0.5
 score     = base × reach × auth × local + EPSS × 20 + (KEV ? 15 : 0) + (user input ? 5 : 0)
@@ -108,7 +115,13 @@ The score never changes a decision; it orders findings within a decision.
 | imported-not-called | `not_affected` | `vulnerable_code_not_in_execute_path` (confidence stated) |
 | called-unreached | `under_investigation` | call sites listed; confirm dead code before closing |
 | imported-unknown-symbol | `affected` | no function data; `action_statement` = fix |
+| image-only | `affected` | present in the image, no code path traced; `action_statement` = fix |
 | reachable | `affected` | path in `status_notes`; `action_statement` = fix |
+
+The image-only rule leans on "a fix exists" because a distribution advisory with no fix
+gives the owner nothing to do but watch; KEV overrides that. Distribution advisories often
+carry no severity of their own, so the CVE record in OSV supplies CVSS and summary when the
+distribution entry lacks them.
 
 ## 7. Known limits of the spike (say them out loud)
 
@@ -147,6 +160,12 @@ The score never changes a decision; it orders findings within a decision.
   arguments traces back. Not tracked: object fields written then read elsewhere, data passed
   through `this`, databases, globals, and sanitisers (a cleaned value still counts as tainted).
 - Bundlers and tree-shaking are ignored: "present" means "in the lockfile".
+- Container images: what syft reports is what counts; packages are matched to OSV by
+  distribution release and source package, so an image whose SBOM carries no `distro`
+  qualifier is queried release-less (Debian, Ubuntu) or not at all (Alpine, where OSV only
+  has per-release data). Binaries (`pkg:generic`) and package types OSV has no ecosystem for
+  are inventoried but never queried, and the Components page counts them. No layer
+  attribution yet.
 - Cross-file resolution over-approximates on purpose: every public function that can reach the
   changed code counts (moment's `months()` reads locale config, so it is listed with
   `locale`). The decision still depends on whether *your* code calls one of them.

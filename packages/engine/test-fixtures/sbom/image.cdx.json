@@ -1,0 +1,108 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:5a1a6a3e-1c4e-4a7b-9f4a-0d1d2c3b4a55",
+  "version": 1,
+  "metadata": {
+    "component": { "bom-ref": "img", "type": "container", "name": "example/shop:1.2", "version": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  },
+  "components": [
+    {
+      "bom-ref": "os",
+      "type": "operating-system",
+      "name": "debian",
+      "version": "12",
+      "description": "Debian GNU/Linux 12 (bookworm)"
+    },
+    {
+      "bom-ref": "libssl3",
+      "type": "library",
+      "name": "libssl3",
+      "version": "3.0.11-1~deb12u2",
+      "purl": "pkg:deb/debian/libssl3@3.0.11-1~deb12u2?arch=amd64&distro=debian-12&upstream=openssl",
+      "properties": [
+        { "name": "syft:package:type", "value": "deb" },
+        { "name": "syft:location:0:path", "value": "/var/lib/dpkg/status" }
+      ]
+    },
+    {
+      "bom-ref": "openssl",
+      "type": "library",
+      "name": "openssl",
+      "version": "3.0.11-1~deb12u2",
+      "purl": "pkg:deb/debian/openssl@3.0.11-1~deb12u2?arch=amd64&distro=debian-12",
+      "properties": [{ "name": "syft:package:type", "value": "deb" }]
+    },
+    {
+      "bom-ref": "libc6",
+      "type": "library",
+      "name": "libc6",
+      "version": "2.36-9+deb12u4",
+      "purl": "pkg:deb/debian/libc6@2.36-9%2Bdeb12u4?arch=amd64&distro=debian-12&upstream=glibc",
+      "properties": [{ "name": "syft:package:type", "value": "deb" }]
+    },
+    {
+      "bom-ref": "lodash",
+      "type": "library",
+      "name": "lodash",
+      "version": "4.17.15",
+      "purl": "pkg:npm/lodash@4.17.15",
+      "properties": [
+        { "name": "syft:package:type", "value": "npm" },
+        { "name": "syft:location:0:path", "value": "/app/node_modules/lodash/package.json" }
+      ]
+    },
+    {
+      "bom-ref": "npm-cli",
+      "type": "library",
+      "name": "npm",
+      "version": "9.6.7",
+      "purl": "pkg:npm/npm@9.6.7",
+      "properties": [
+        { "name": "syft:package:type", "value": "npm" },
+        { "name": "syft:location:0:path", "value": "/usr/local/lib/node_modules/npm/package.json" }
+      ]
+    },
+    {
+      "bom-ref": "babel-core",
+      "type": "library",
+      "name": "@babel/core",
+      "version": "7.22.5",
+      "purl": "pkg:npm/%40babel/core@7.22.5",
+      "properties": [{ "name": "syft:package:type", "value": "npm" }]
+    },
+    {
+      "bom-ref": "requests",
+      "type": "library",
+      "name": "Requests",
+      "version": "2.31.0",
+      "purl": "pkg:pypi/Requests@2.31.0",
+      "properties": [{ "name": "syft:package:type", "value": "python" }]
+    },
+    {
+      "bom-ref": "stdlib",
+      "type": "library",
+      "name": "stdlib",
+      "version": "go1.21.0",
+      "purl": "pkg:golang/stdlib@1.21.0",
+      "properties": [{ "name": "syft:package:type", "value": "go-module" }]
+    },
+    {
+      "bom-ref": "yaml",
+      "type": "library",
+      "name": "gopkg.in/yaml.v3",
+      "version": "v3.0.0",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@v3.0.0",
+      "properties": [{ "name": "syft:package:type", "value": "go-module" }]
+    },
+    {
+      "bom-ref": "node-bin",
+      "type": "application",
+      "name": "node",
+      "version": "18.17.1",
+      "purl": "pkg:generic/node@18.17.1",
+      "properties": [{ "name": "syft:package:type", "value": "binary" }]
+    }
+  ]
+}

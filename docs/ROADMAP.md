@@ -71,14 +71,29 @@ resource classes, Starlette-only apps, Tornado; method calls on framework object
 The repository opens once the five remaining feature-table items are done, in this order:
 
 1. Jira and GitHub Issues export (0.7) — done 2026-10-09
-2. Container image inventory through a Syft/Grype adapter (0.8)
+2. Container image inventory through a Syft adapter (0.8) — done 2026-10-09
 3. Go via govulncheck (0.9)
 4. Team features: local accounts, roles, audit log, API tokens, OIDC (0.10)
 5. Packaging: single executable per platform, Docker image, Windows installer (1.0)
 
 The trademark filing package is in `docs/TRADEMARK.md`; filing is the applicant's own step.
 
-## 0.7 — Team features (open, in this repo)
+## 0.8 — Container images (done 2026-10-09)
+
+`image` in `nextfix.config.json` or `--image` on the CLI inventories the built image through
+syft (local binary, or the pinned `anchore/syft` container when Docker is present); SBOM files
+(CycloneDX, SPDX, Grype JSON) are read directly, and any `*.cdx.json` / `*.spdx.json` at the
+project root is picked up. OS packages are queried in their distribution's OSV ecosystem
+(`Debian:12`, `Alpine:v3.18`, `Ubuntu:22.04:LTS`, Wolfi, Chainguard, Red Hat, AlmaLinux,
+Rocky) by source package, with dpkg-style version ordering for fixes. A package that exists
+only in the image lands in the `image-only` tier: watched, or scheduled when exploited or
+fixable and severe. Go modules found in binaries are queried too.
+
+Known open: no call-path claim is made inside an image; the container route reads daemon
+images only (not `dir:` or archive sources); Grype itself is not needed because OSV answers
+for every supported distribution.
+
+## 0.10 — Team features (open, in this repo)
 
 - OIDC single sign-on, local accounts fallback.
 - Roles: admin, analyst, viewer (executives are viewers).
@@ -86,10 +101,9 @@ The trademark filing package is in `docs/TRADEMARK.md`; filing is the applicant'
 - Offline advisory bundles for air-gapped installs.
 - The open repo keeps WCAG AA on every page and a stable API the team edition builds on.
 
-## 0.8 — Go
+## 0.9 — Go
 
-- Python: tree-sitter (wasm) parser, Flask / FastAPI / Django entry points, same tiers.
-- Go: wrap `govulncheck` (symbol-level, from the Go vuln DB) and map into tiers.
+- Wrap `govulncheck` (symbol-level, from the Go vuln DB) and map into tiers.
 
 ## Going public
 

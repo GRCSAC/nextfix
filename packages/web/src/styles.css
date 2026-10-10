@@ -26,6 +26,7 @@
   --c-aside: #2563eb;
   --c-good: #0ca30c;
   --seq-2: #93c5fd;
+  --seq-3: #60a5fa;
   --seq-4: #3b82f6;
 
   --radius: 12px;
@@ -55,6 +56,7 @@
   --c-watch: #22d3ee;
   --c-aside: #3b82f6;
   --seq-2: #93c5fd;
+  --seq-3: #60a5fa;
   --seq-4: #3b82f6;
   --shadow: none;
   --glow: 0 0 26px rgba(34, 211, 238, 0.28);
@@ -260,6 +262,10 @@ table.tbl .pkg, .pkg { font-weight: 600; white-space: nowrap; }
 .ev-item:hover { background: var(--surface-3); }
 
 /* ---------- findings workbench ---------- */
+.images { display: grid; gap: 6px; padding: 12px 16px; }
+.image-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.image-row .mono { font-weight: 600; }
+.image-err .small { color: var(--c-attend); }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .chip { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
 .chip[aria-pressed="true"] { background: var(--accent-wash); border-color: var(--accent); color: var(--ink); }

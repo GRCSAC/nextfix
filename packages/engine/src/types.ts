@@ -1,4 +1,28 @@
-export type Ecosystem = 'npm' | 'PyPI';
+/**
+ * OSV ecosystem string. Code ecosystems come from lockfiles and SBOMs; distribution
+ * ecosystems (from container images) carry the release suffix OSV expects, e.g. `Debian:12`,
+ * `Alpine:v3.18`, `Ubuntu:22.04:LTS`. `generic` is inventoried but never queried.
+ */
+export type Ecosystem =
+  | 'npm'
+  | 'PyPI'
+  | 'Go'
+  | 'Maven'
+  | 'RubyGems'
+  | 'crates.io'
+  | 'NuGet'
+  | 'Packagist'
+  | 'Hex'
+  | 'Pub'
+  | 'generic'
+  | `Debian${string}`
+  | `Ubuntu${string}`
+  | `Alpine${string}`
+  | 'Wolfi'
+  | 'Chainguard'
+  | 'Red Hat'
+  | `AlmaLinux${string}`
+  | `Rocky Linux${string}`;
 
 export interface Component {
   ecosystem: Ecosystem;
@@ -14,6 +38,26 @@ export interface Component {
   path: string;
   /** All lockfile paths when the same name@version is installed more than once. */
   paths?: string[];
+  /** Where the component was found: absent for the project lockfile, `image` for a container image or SBOM. */
+  origin?: 'image';
+  /** Image reference or SBOM file the component was found in (also set on lockfile components the image contains). */
+  image?: string;
+  /** Package manager type from the SBOM (deb, apk, rpm, npm, python, go-module, binary, …). */
+  packageType?: string;
+}
+
+/** One container image or SBOM that contributed components to a scan. */
+export interface ImageInventory {
+  /** Image reference as given, or the SBOM file path. */
+  ref: string;
+  source: 'syft' | 'cyclonedx' | 'spdx' | 'grype';
+  /** Operating system found in the image, e.g. `debian 12`. */
+  os?: string;
+  components: number;
+  /** Components in ecosystems OSV cannot answer for (binaries, unknown types). */
+  unqueried: number;
+  /** Set when the image could not be read (no syft, syft failed); the scan continues without it. */
+  error?: string;
 }
 
 export interface Advisory {
@@ -75,6 +119,7 @@ export type ReachTier =
   | 'imported-not-called'
   | 'imported-unknown-symbol'
   | 'called-unreached'
+  | 'image-only'
   | 'reachable';
 
 export type ReachConfidence = SymbolConfidence | 'package-level';
@@ -177,5 +222,7 @@ export interface ScanReport {
   entryPoints: EntryPoint[];
   /** Every installed component (absent in reports written before 0.3). */
   components?: Component[];
+  /** Container images and SBOMs read for this scan (absent before 0.8). */
+  images?: ImageInventory[];
   findings: Finding[];
 }

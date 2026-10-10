@@ -15,7 +15,7 @@ import type { Advisory } from './types.ts';
 const HELP = `NextFix ${toolVersion()} — tells you what to fix next, and why.
 
 Usage:
-  nextfix scan <dir> [--json <file>] [--vex <file>] [--offline] [--no-derive] [--why N] [--quiet]
+  nextfix scan <dir> [--image <ref>] [--sbom <file>] [--json <file>] [--vex <file>] [--offline] [--no-derive] [--why N] [--quiet]
   nextfix symbols derive <advisory-id> <package> [--pypi] [--force]   Derive vulnerable functions from the fix commit
   nextfix symbols list                                        Show derived entries on this machine
   nextfix symbols confirm <advisory-id> <package>             Promote a derived entry after review
@@ -24,6 +24,8 @@ Usage:
   nextfix --version
 
 Options:
+  --image <ref>   Also inventory this container image with syft (repeatable; or "image" in nextfix.config.json).
+  --sbom <file>   Also read this CycloneDX / SPDX / Grype JSON (repeatable; *.cdx.json and *.spdx.json at the root are read anyway).
   --json <file>   Write the full report as JSON.
   --vex <file>    Write an OpenVEX document (one statement per finding).
   --offline       Use only cached data (~/.nextfix/cache.sqlite).
@@ -32,6 +34,7 @@ Options:
   --quiet         No progress output.
 
 Set GITHUB_TOKEN to raise GitHub's unauthenticated rate limit when deriving symbols.
+Set NEXTFIX_SYFT to the syft binary when it is not on the PATH.
 `;
 
 async function main() {
@@ -40,6 +43,8 @@ async function main() {
     options: {
       json: { type: 'string' },
       vex: { type: 'string' },
+      image: { type: 'string', multiple: true },
+      sbom: { type: 'string', multiple: true },
       offline: { type: 'boolean', default: false },
       'no-derive': { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
@@ -66,7 +71,7 @@ async function main() {
     return;
   }
 
-  const report = await scan(dir, { offline: values.offline, derive: !values['no-derive'], log });
+  const report = await scan(dir, { offline: values.offline, derive: !values['no-derive'], images: values.image, sboms: values.sbom, log });
 
   if (values.json) writeOut(values.json, JSON.stringify(report, null, 2));
   if (values.vex) writeOut(values.vex, JSON.stringify(toOpenVex(report), null, 2));

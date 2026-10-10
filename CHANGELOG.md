@@ -5,6 +5,40 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-09
+
+### Added
+- **Container image inventory.** `image` in `nextfix.config.json` or `--image <ref>` runs
+  syft over the built image and merges its packages with the lockfile: the local `syft`
+  binary (or `NEXTFIX_SYFT`) when present, otherwise the pinned `anchore/syft` container
+  through Docker, which also covers a local syft that cannot read images (syft on Windows
+  currently fails on its own layer-cache paths). A missing or failing image is reported per
+  image; the scan continues.
+- **SBOM input.** CycloneDX JSON, SPDX JSON and Grype JSON are read with `--sbom <file>` or
+  `sbom` in the config; `*.cdx.json`, `*.spdx.json`, `sbom.json` and `bom.json` at the
+  project root are picked up without being asked.
+- **Distribution ecosystems.** OS packages are queried in OSV as `Debian:<release>`,
+  `Ubuntu:<release>[:LTS]`, `Alpine:v<major.minor>`, Wolfi, Chainguard, Red Hat,
+  `AlmaLinux:<n>`, `Rocky Linux:<n>`, by source package (binary packages of one source merge
+  into one component, listed in the Components page), with dpkg-style version ordering for
+  fixed versions. Go modules in binaries go to the Go ecosystem; Maven, RubyGems, crates.io,
+  NuGet, Packagist, Hex and Pub are mapped for SBOMs that carry them. Binaries and unknown
+  types are listed as `generic` and not queried.
+- **`image-only` tier.** A package present only in the image gets no call-path claim; it is
+  Attend when in KEV, or when a fix exists and EPSS ≥ 10% or CVSS ≥ 7, otherwise Track\*. Fix
+  text and ticket command point at the image (`apt-get` / `apk` / `dnf`, rebuild the base).
+  OpenVEX marks it `affected` with the reason.
+- Distribution advisories without severity or summary of their own take both from the CVE
+  record in OSV; `DEBIAN-CVE-…`-style ids resolve to their CVE for EPSS and KEV.
+- Components page: image header (OS, component count, how many are unqueried, which route
+  read it), a "Where" column, and "Project lockfiles only" / "In the image" scopes. The
+  terminal summary lists each image.
+
+### Changed
+- `Ecosystem` is the OSV ecosystem string, no longer limited to `npm` and `PyPI`; reports and
+  the Components page show it as is (`Alpine:v3.24`).
+- `fixCommand` lives in the engine (`report/ticket.ts`) and the dashboard reuses it.
+
 ## [0.7.0] — 2026-10-09
 
 ### Added

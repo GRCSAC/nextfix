@@ -47,6 +47,10 @@ requirements or a lockfile (or both in one folder):
 node packages/engine/src/cli.ts scan samples/express-shop --json out/report.json --vex out/report.openvex.json
 ```
 
+Add `--image <ref>` to inventory the built container image as well, or `--sbom <file>` to
+read a CycloneDX, SPDX or Grype JSON document you already have (see
+[Container images](#container-images)).
+
 ```
 NextFix 0.1.0 — express-shop 1.0.0
 53 components, 20 advisories → 20 findings
@@ -106,6 +110,7 @@ Act · lodash@4.17.15 · CVE-2021-23337
 | `unused` | installed, but no source file imports it | Track |
 | `imported-not-called` | imported, but none of the vulnerable functions are called | Track |
 | `imported-unknown-symbol` | imported, and NextFix has no function-level data for this advisory yet | Track\* / Attend |
+| `image-only` | present in the container image but not imported by the application (OS package, tooling, a binary) | Track\* / Attend |
 | `called-unreached` | the vulnerable function is called, but no HTTP entry point leads there | Track\* / Attend |
 | `reachable` | an entry point leads to the vulnerable call; graded by auth, user input, exposure, EPSS, KEV | Attend / Act |
 
@@ -146,12 +151,47 @@ Optional `nextfix.config.json` in the project root:
 {
   "authGuards": ["checkSession", "requireTenant"],
   "ignore": ["scripts", "tools"],
-  "internalRoutes": ["GET /healthz", "GET /metrics"]
+  "internalRoutes": ["GET /healthz", "GET /metrics"],
+  "image": "ghcr.io/example/shop:1.4",
+  "sbom": ["build/shop.cdx.json"]
 }
 ```
 
 `authGuards` are regular expressions added to the built-in guard names (`authGuardsReplace: true`
-replaces them). `internalRoutes` are treated as authenticated.
+replaces them). `internalRoutes` are treated as authenticated. `image` and `sbom` take one
+reference or a list; `syft` names the syft binary when it is not on the PATH (or `"docker"`
+to always use the container).
+
+### Container images
+
+The lockfile says what the application depends on; the image says what actually ships
+around it: the base distribution's packages, a Node or Python runtime, globally installed
+tooling and its dependencies. NextFix inventories the image through
+[syft](https://github.com/anchore/syft) and merges the result with the lockfile:
+
+- **Where syft comes from.** A `syft` on the PATH (or `NEXTFIX_SYFT`) is used first. If
+  there is none, or it fails, and Docker is available, NextFix runs the pinned
+  `anchore/syft` container against the daemon's socket, which reads any image the daemon
+  has. With neither, the image is reported as not inventoried and the scan continues.
+- **SBOM files** (`*.cdx.json`, `*.spdx.json`, `sbom.json`, `bom.json`) at the project root
+  are read without being asked; `--sbom` and `sbom` in the config add others. A Grype
+  report is accepted too (only its matched artifacts are known).
+- **OS packages** are queried in their distribution's OSV ecosystem (`Debian:12`,
+  `Ubuntu:22.04:LTS`, `Alpine:v3.18`, Wolfi, Chainguard, Red Hat, AlmaLinux, Rocky Linux) by
+  source package, so `libssl3` and `openssl` become one `openssl` finding, and fixed
+  versions are compared the way `dpkg` compares them. Go modules found in binaries are
+  queried in the Go ecosystem. Binaries and unknown package types are listed as `generic`
+  and not queried; the Components page says how many.
+- **Decisions.** A package that is also in the lockfile keeps its code-level tier. A package
+  only in the image lands in `image-only`: NextFix makes no call-path claim inside an image,
+  so the call rests on exploitation evidence, severity and whether the distribution has
+  shipped a fix (Attend when in KEV, or fixable and EPSS ≥ 10% or CVSS ≥ 7; otherwise
+  Track\*). The fix text says to rebuild from an updated base image or upgrade the package in
+  the Dockerfile, and the ticket carries the `apt-get` / `apk` / `dnf` line.
+
+On the demo image (`docker build -t nextfix-sample:dev samples/express-shop`, Alpine 3.24
+base) the image adds 158 components to the lockfile's 53: 18 Alpine packages, the Node
+binary, and npm's own bundled dependencies, which produce the `image-only` findings.
 
 ## Run it
 
@@ -220,7 +260,7 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Brand applied (see docs/BRAND.md) | ✅ |
 | Server mode: SQLite history, trends, scan diff, JSON API | ✅ |
 | SSO (OIDC), RBAC, audit log, API tokens | ⬜ |
-| Container image inventory (Syft/Grype adapter) | ⬜ |
+| Container image inventory (syft binary or container; CycloneDX / SPDX / Grype input; distro ecosystems) | ✅ |
 | Jira / GitHub Issues export (per finding and bulk, links remembered) | ✅ |
 | Packaging: single executable + Docker image | ⬜ |
 
@@ -231,7 +271,8 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 - Executive one-page PDF export; scheduled re-scans; e-mail or Slack digest.
 - NestJS and Hapi entry-point detection.
 - Framework objects beyond Express `res` (e.g. Next.js API routes, serverless handlers).
-- Import of a CycloneDX SBOM instead of a lockfile.
+- Image sources beyond the daemon and registries when syft runs in its container (`dir:`,
+  archives); layer attribution for image findings (which Dockerfile line brought it in).
 - Deeper taint (sanitizers, multi-level, object fields).
 - Bundler-aware analysis (tree-shaken builds change what is "present").
 

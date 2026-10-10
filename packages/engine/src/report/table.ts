@@ -4,6 +4,7 @@ const TIER_LABEL: Record<Finding['reach']['tier'], string> = {
   reachable: 'reachable',
   'called-unreached': 'called, unreached',
   'imported-unknown-symbol': 'imported (no fn data)',
+  'image-only': 'in image only',
   'imported-not-called': 'imported, not called',
   unused: 'not imported',
   'dev-only': 'dev only',
@@ -18,6 +19,7 @@ export function renderSummary(r: ScanReport): string {
     `${Math.round(s.noiseRemoved * 100)}% of findings need no action right now, with evidence.`,
     `Entry points: ${r.entryPoints.length} (${r.entryPoints.filter((e) => !e.authenticated).length} unauthenticated) · network: ${r.exposure.network}${r.exposure.ports.length ? ' on ' + r.exposure.ports.join(',') : ''}`,
   ];
+  for (const img of r.images ?? []) lines.push(img.error ? `Image ${img.ref}: ${img.error}` : `Image ${img.ref}: ${img.components} components${img.os ? ` (${img.os})` : ''}${img.unqueried ? `, ${img.unqueried} without advisory data` : ''}`);
   return lines.join('\n');
 }
 

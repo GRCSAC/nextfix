@@ -1,0 +1,59 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "alpine:3.18",
+  "documentNamespace": "https://example.invalid/spdx/alpine-3.18",
+  "creationInfo": { "created": "2026-10-09T00:00:00Z", "creators": ["Tool: example"] },
+  "packages": [
+    {
+      "name": "alpine",
+      "SPDXID": "SPDXRef-OS",
+      "versionInfo": "3.18.4",
+      "primaryPackagePurpose": "OPERATING-SYSTEM",
+      "downloadLocation": "NOASSERTION"
+    },
+    {
+      "name": "libssl3",
+      "SPDXID": "SPDXRef-Package-apk-libssl3",
+      "versionInfo": "3.1.4-r0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:apk/alpine/libssl3@3.1.4-r0?arch=x86_64&distro=alpine-3.18.4&upstream=openssl" }
+      ]
+    },
+    {
+      "name": "libcrypto3",
+      "SPDXID": "SPDXRef-Package-apk-libcrypto3",
+      "versionInfo": "3.1.4-r0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:apk/alpine/libcrypto3@3.1.4-r0?arch=x86_64&distro=alpine-3.18.4&upstream=openssl" }
+      ]
+    },
+    {
+      "name": "busybox",
+      "SPDXID": "SPDXRef-Package-apk-busybox",
+      "versionInfo": "1.36.1-r5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:apk/alpine/busybox@1.36.1-r5?arch=x86_64&distro=alpine-3.18.4" }
+      ]
+    },
+    {
+      "name": "openssl",
+      "SPDXID": "SPDXRef-Package-rpm-openssl",
+      "versionInfo": "3.0.7-16.el9_2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:rpm/almalinux/openssl@3.0.7-16.el9_2?arch=x86_64&epoch=1&distro=almalinux-9.2&upstream=openssl-3.0.7-16.el9_2.src.rpm" }
+      ]
+    },
+    {
+      "name": "no-purl",
+      "SPDXID": "SPDXRef-Package-nopurl",
+      "versionInfo": "1.0",
+      "downloadLocation": "NOASSERTION"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ const STATE_COLOR: Record<ComponentState, string> = {
   reachable: 'var(--c-act)',
   'called-unreached': 'var(--c-attend)',
   'imported-unknown-symbol': 'var(--c-watch)',
+  'image-only': 'var(--seq-3)',
   'imported-not-called': 'var(--seq-4)',
   unused: 'var(--seq-2)',
   'dev-only': 'var(--muted)',

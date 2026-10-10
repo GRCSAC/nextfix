@@ -36,6 +36,8 @@ function statement(f: Finding, ts: string): Record<string, unknown> {
       return { ...base, status: 'under_investigation', status_notes: `Vulnerable function is called at ${f.reach.callSites.map((s) => `${s.file}:${s.line}`).join(', ')} but no HTTP entry point reaches it. Confirm the code is dead before marking not_affected.` };
     case 'imported-unknown-symbol':
       return { ...base, status: 'affected', status_notes: 'Package is imported; NextFix has no function-level data for this advisory, so it is treated as affected.', action_statement: f.fix ?? 'No fixed version published.' };
+    case 'image-only':
+      return { ...base, status: 'affected', status_notes: `Package is present in the container image${f.component.image ? ` ${f.component.image}` : ''}; NextFix does not trace code paths inside images, so it is treated as affected.`, action_statement: f.fix ?? 'No fixed version published by the distribution.' };
     case 'reachable':
       return { ...base, status: 'affected', status_notes: f.why.find((w) => w.startsWith('Reachable:')), action_statement: f.fix ?? 'No fixed version published; mitigate at the entry point.' };
   }

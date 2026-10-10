@@ -1,5 +1,6 @@
 import semver from 'semver';
 import type { Decision, Exploitation, Finding } from '../types.ts';
+import { isDistro } from '../vulns/ecosystems.ts';
 
 type Input = Omit<Finding, 'decision' | 'score' | 'why' | 'fix' | 'exploitation'>;
 
@@ -47,6 +48,15 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
       decision = exploitation === 'active' ? 'Attend' : 'Track*';
       why.push(`Called but unreachable: ${describeSites(reach)} — no HTTP entry point leads there (dead or internal-only code).`);
       break;
+    case 'image-only': {
+      // No call path can be claimed for an OS package or tooling inside the image, so the call rests on
+      // exploitation evidence, severity and whether a fix exists to move to.
+      decision = exploitation === 'active' || (a.fixedVersion && (exploitation === 'likely' || (cvss ?? 0) >= 7)) ? 'Attend' : 'Track*';
+      const kind = isDistro(c.ecosystem) ? `an OS package (${c.ecosystem})` : c.packageType === 'binary' ? 'a binary' : `a ${c.ecosystem} package`;
+      why.push(`In the container image only: ${c.name} is ${kind} in ${c.image ?? 'the image'}${c.path && c.path !== c.name ? ` (${(c.paths ?? [c.path]).join(', ')})` : ''}; the application code does not import it, and NextFix does not trace code paths inside images.`);
+      if (!a.fixedVersion && exploitation !== 'active') why.push('No fix is available to move to, so this is watched rather than scheduled.');
+      break;
+    }
     case 'reachable': {
       if (unauth) decision = exploitation !== 'none' || (cvss ?? 0) >= 9 || (userInput && (cvss ?? 0) >= 7) ? 'Act' : 'Attend';
       else decision = exploitation === 'active' ? 'Act' : 'Attend';
@@ -90,7 +100,8 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
   let fix: string | undefined;
   if (a.fixedVersion) {
     const major = majorOf(a.fixedVersion) !== majorOf(c.version);
-    fix = `Upgrade ${c.name} ${c.version} → ${a.fixedVersion}${major ? ' (major version change — check for breaking changes)' : ''}`;
+    if (c.origin === 'image' && reach.tier === 'image-only') fix = `Upgrade ${c.name} ${c.version} → ${a.fixedVersion} in the image (rebuild from an updated base image, or upgrade the package in the Dockerfile)`;
+    else fix = `Upgrade ${c.name} ${c.version} → ${a.fixedVersion}${major ? ' (major version change — check for breaking changes)' : ''}`;
     why.push(`${fix}.`);
   } else {
     why.push('No fixed version is published yet.');
@@ -105,6 +116,7 @@ function score(f: Input, exploitation: Exploitation, unauth: boolean, userInput:
     reachable: 1,
     'called-unreached': 0.55,
     'imported-unknown-symbol': 0.6,
+    'image-only': 0.5,
     'imported-not-called': 0.2,
     unused: 0.1,
     'dev-only': 0.05,

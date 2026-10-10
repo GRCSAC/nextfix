@@ -7,6 +7,8 @@ import { toOpenVex } from '../../engine/src/report/vex.ts';
 import { toolVersion } from '../../engine/src/version.ts';
 import { defaultCachePath } from '../../engine/src/vulns/cache.ts';
 import { hasPythonProject } from '../../engine/src/inventory/python.ts';
+import { detectSbomFiles } from '../../engine/src/inventory/container.ts';
+import { asList, loadConfig } from '../../engine/src/config.ts';
 import { ticketMarkdown, ticketTitle } from '../../engine/src/report/ticket.ts';
 import { githubCreateIssue, githubTest, jiraCreateIssue, jiraTest, IntegrationError, type GitHubConfig, type JiraConfig } from './integrations.ts';
 import { Store } from './store.ts';
@@ -35,6 +37,17 @@ class HttpError extends Error {
   constructor(status: number, message: string) {
     super(message);
     this.status = status;
+  }
+}
+
+/** A folder with an image or SBOM to inventory is a valid target even without a lockfile. */
+function hasImageSources(dir: string): boolean {
+  if (detectSbomFiles(dir).length) return true;
+  try {
+    const cfg = loadConfig(dir);
+    return asList(cfg.image).length > 0 || asList(cfg.sbom).length > 0;
+  } catch {
+    return false;
   }
 }
 
@@ -94,7 +107,7 @@ export function createNextFixServer(opts: ServerOptions) {
         const body = await readJson<{ dir?: string }>(req);
         const dir = body.dir ? resolve(body.dir) : '';
         if (!dir || !existsSync(dir) || !statSync(dir).isDirectory()) throw new HttpError(400, `Folder not found: ${body.dir ?? ''}`);
-        if (!existsSync(join(dir, 'package-lock.json')) && !hasPythonProject(dir)) throw new HttpError(400, 'That folder has no package-lock.json and no Python requirements or lockfile. NextFix scans npm and PyPI projects with pinned dependencies.');
+        if (!existsSync(join(dir, 'package-lock.json')) && !hasPythonProject(dir) && !hasImageSources(dir)) throw new HttpError(400, 'That folder has no package-lock.json, no Python requirements or lockfile, no SBOM and no image in nextfix.config.json. NextFix scans npm and PyPI projects with pinned dependencies, and container images.');
         const target = opts.store.upsertTarget(dir);
         const result = await runScan(target.id);
         return send(res, 201, { target: opts.store.getTarget(target.id), ...result });

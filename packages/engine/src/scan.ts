@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { readNpmLock } from './inventory/npm-lock.ts';
 import { hasPythonProject, readPythonDeps } from './inventory/python.ts';
+import { componentKey, detectSbomFiles, readContainerInventory } from './inventory/container.ts';
 import { analyzePythonProject } from './graph/py/project.ts';
 import { mergeGraphs } from './graph/merge.ts';
 import type { Component } from './types.ts';
@@ -15,10 +16,10 @@ import { assessReach } from './reach/reachability.ts';
 import { analyzeExposure } from './exposure/docker.ts';
 import { decide } from './decide/ssvc.ts';
 import { toolVersion } from './version.ts';
-import { loadConfig } from './config.ts';
+import { asList, loadConfig } from './config.ts';
 import { DerivedStore } from './symbols/store.ts';
 import { deriveSymbols } from './symbols/derive.ts';
-import type { Decision, Finding, ReachTier, ScanReport } from './types.ts';
+import type { Decision, Finding, ImageInventory, ReachResult, ReachTier, ScanReport } from './types.ts';
 
 export interface ScanOptions {
   offline?: boolean;
@@ -30,8 +31,14 @@ export interface ScanOptions {
   /** Advisories derived in parallel (default 4). */
   deriveConcurrency?: number;
   githubToken?: string;
+  /** Container images to inventory with syft, in addition to `image` in nextfix.config.json. */
+  images?: string[];
+  /** SBOM files to read, in addition to `sbom` in the config and any `*.cdx.json` / `*.spdx.json` at the root. */
+  sboms?: string[];
   log?: (msg: string) => void;
 }
+
+const IMAGE_ONLY: ReachResult = { tier: 'image-only', confidence: 'package-level', importedIn: [], callSites: [], paths: [] };
 
 const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
 
@@ -43,7 +50,9 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     const config = loadConfig(rootDir);
     const hasNode = existsSync(join(rootDir, 'package-lock.json'));
     const hasPy = hasPythonProject(rootDir);
-    if (!hasNode && !hasPy) throw new Error(`No package-lock.json and no Python requirements/lockfile in ${rootDir}.`);
+    const imageRefs = [...new Set([...asList(config.image), ...(opts.images ?? [])])];
+    const sbomFiles = [...new Set([...asList(config.sbom), ...(opts.sboms ?? []), ...detectSbomFiles(rootDir)])];
+    if (!hasNode && !hasPy && !imageRefs.length && !sbomFiles.length) throw new Error(`No package-lock.json, Python requirements/lockfile, SBOM or container image for ${rootDir}.`);
 
     const components: Component[] = [];
     let projectName: string | undefined;
@@ -60,6 +69,24 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       const pyInv = readPythonDeps(rootDir);
       components.push(...pyInv.components);
       log(`Inventory: ${pyInv.components.length} PyPI components from ${pyInv.sources.join(', ')}`);
+    }
+    let images: ImageInventory[] | undefined;
+    if (imageRefs.length || sbomFiles.length) {
+      const ci = await readContainerInventory(rootDir, { images: imageRefs, sboms: sbomFiles, syftPath: config.syft, log });
+      const have = new Map(components.map((c) => [componentKey(c), c]));
+      let added = 0;
+      for (const c of ci.components) {
+        const existing = have.get(componentKey(c));
+        if (existing) {
+          existing.image = c.image;
+          continue;
+        }
+        have.set(componentKey(c), c);
+        components.push(c);
+        added++;
+      }
+      images = ci.images;
+      log(`Inventory: ${added} components from ${ci.images.filter((i) => !i.error).length} image(s)/SBOM(s), ${ci.components.length - added} already in the lockfile`);
     }
     const inv = { components, projectName: projectName ?? basename(rootDir), projectVersion };
 
@@ -93,7 +120,10 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       const budget = opts.deriveBudgetMs ?? 90_000;
       const started = Date.now();
       const queue: { c: Component; a: (typeof findings)[number]['advisory'] }[] = [];
-      for (const c of inv.components) for (const a of advisories.get(c.purl) ?? []) if (!symbols.lookup([a.id, ...a.aliases], c.name)) queue.push({ c, a });
+      for (const c of inv.components) {
+        if (c.ecosystem !== 'npm' && c.ecosystem !== 'PyPI') continue;
+        for (const a of advisories.get(c.purl) ?? []) if (!symbols.lookup([a.id, ...a.aliases], c.name)) queue.push({ c, a });
+      }
       // Several advisories at once: derivation is bound by GitHub fetch latency, not CPU.
       const worker = async () => {
         while (queue.length && !stopped) {
@@ -102,7 +132,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
             deferred++;
             continue;
           }
-          const out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences, ecosystem: c.ecosystem });
+          const out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences, ecosystem: c.ecosystem as 'npm' | 'PyPI' });
           if (out.entry) {
             if (!out.cached) derived++;
             symbols.add(out.entry);
@@ -125,7 +155,10 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     for (const c of inv.components) {
       for (const a of advisories.get(c.purl) ?? []) {
         const sym = symbols.lookup([a.id, ...a.aliases], c.name);
-        const reach = assessReach(graph, c, sym);
+        // A package that exists only in the image is analysed through the code graph only when the
+        // application imports it; OS packages and tooling inside the image get no call-path claim.
+        const codeUsed = (c.ecosystem === 'npm' || c.ecosystem === 'PyPI') && graph.packagesImported.has(c.name);
+        const reach = c.origin === 'image' && !codeUsed ? IMAGE_ONLY : assessReach(graph, c, sym);
         const partial = {
           id: `${c.purl}|${a.id}`,
           component: c,
@@ -142,7 +175,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     findings.sort((x, y) => DECISION_ORDER.indexOf(x.decision) - DECISION_ORDER.indexOf(y.decision) || y.score - x.score || x.component.name.localeCompare(y.component.name));
 
     const byDecision = { Act: 0, Attend: 0, 'Track*': 0, Track: 0 } as Record<Decision, number>;
-    const byTier = { reachable: 0, 'called-unreached': 0, 'imported-unknown-symbol': 0, 'imported-not-called': 0, unused: 0, 'dev-only': 0 } as Record<ReachTier, number>;
+    const byTier = { reachable: 0, 'called-unreached': 0, 'imported-unknown-symbol': 0, 'image-only': 0, 'imported-not-called': 0, unused: 0, 'dev-only': 0 } as Record<ReachTier, number>;
     for (const f of findings) {
       byDecision[f.decision]++;
       byTier[f.reach.tier]++;
@@ -164,6 +197,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       exposure,
       entryPoints: graph.entryPoints,
       components: inv.components,
+      images,
       findings,
     };
   } finally {

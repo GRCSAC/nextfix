@@ -16,6 +16,7 @@ export const TIER_LABEL: Record<ReachTier, string> = {
   reachable: 'Reachable from an entry point',
   'called-unreached': 'Called, but no entry point reaches it',
   'imported-unknown-symbol': 'Imported; no function-level data yet',
+  'image-only': 'In the container image; no code path traced',
   'imported-not-called': 'Imported, vulnerable function never called',
   unused: 'Installed but never imported',
   'dev-only': 'Dev dependency, not shipped',
@@ -25,12 +26,13 @@ export const TIER_SHORT: Record<ReachTier, string> = {
   reachable: 'Reachable',
   'called-unreached': 'Called, unreached',
   'imported-unknown-symbol': 'Imported, no fn data',
+  'image-only': 'In image only',
   'imported-not-called': 'Imported, not called',
   unused: 'Not imported',
   'dev-only': 'Dev only',
 };
 
-export const TIERS: ReachTier[] = ['reachable', 'called-unreached', 'imported-unknown-symbol', 'imported-not-called', 'unused', 'dev-only'];
+export const TIERS: ReachTier[] = ['reachable', 'called-unreached', 'imported-unknown-symbol', 'image-only', 'imported-not-called', 'unused', 'dev-only'];
 
 /** Evidence categories: the set-aside tiers and the audit-facing wording for each. */
 export const EVIDENCE_TIERS: { tier: ReachTier; label: string; justification: string }[] = [
@@ -90,11 +92,7 @@ export function severity(f: Finding): { label: string; cls: string } {
   return { label: pretty, cls: norm === 'CRITICAL' ? 'sev-critical' : norm === 'HIGH' ? 'sev-high' : norm === 'MEDIUM' ? 'sev-medium' : 'sev-low' };
 }
 
-export function fixCommand(f: Finding): string | undefined {
-  if (!f.advisory.fixedVersion) return undefined;
-  if (f.component.ecosystem === 'PyPI') return `pip install "${f.component.name}==${f.advisory.fixedVersion}"`;
-  return `npm install ${f.component.name}@${f.advisory.fixedVersion}`;
-}
+export { fixCommandFor as fixCommand } from '../../engine/src/report/ticket.ts';
 
 export type ComponentState = ReachTier | 'clean';
 export const STATE_LABEL: Record<ComponentState, string> = { ...TIER_SHORT, clean: 'No advisories' };

@@ -1,4 +1,5 @@
 import type { Finding } from '../types.ts';
+import { isDistro } from '../vulns/ecosystems.ts';
 
 const DECISION_HELP: Record<Finding['decision'], string> = {
   Act: 'Fix now',
@@ -11,6 +12,7 @@ const TIER_LABEL: Record<Finding['reach']['tier'], string> = {
   reachable: 'Reachable from an entry point',
   'called-unreached': 'Called, but no entry point reaches it',
   'imported-unknown-symbol': 'Imported; no function-level data yet',
+  'image-only': 'In the container image; no code path traced',
   'imported-not-called': 'Imported, vulnerable function never called',
   unused: 'Installed but never imported',
   'dev-only': 'Dev dependency, not shipped',
@@ -21,9 +23,20 @@ export function bestPathOf(f: Finding) {
 }
 
 export function fixCommandFor(f: Finding): string | undefined {
-  if (!f.advisory.fixedVersion) return undefined;
-  if (f.component.ecosystem === 'PyPI') return `pip install "${f.component.name}==${f.advisory.fixedVersion}"`;
-  return `npm install ${f.component.name}@${f.advisory.fixedVersion}`;
+  const v = f.advisory.fixedVersion;
+  if (!v) return undefined;
+  const { ecosystem: eco, name } = f.component;
+  if (eco === 'npm') return `npm install ${name}@${v}`;
+  if (eco === 'PyPI') return `pip install "${name}==${v}"`;
+  if (eco === 'Go') return `go get ${name}@${v.startsWith('v') ? v : 'v' + v}`;
+  if (eco === 'RubyGems') return `gem install ${name} -v ${v}`;
+  if (eco === 'crates.io') return `cargo update -p ${name} --precise ${v}`;
+  if (eco === 'NuGet') return `dotnet add package ${name} --version ${v}`;
+  if (eco === 'Packagist') return `composer require ${name}:${v}`;
+  if (/^(Debian|Ubuntu)/.test(eco)) return `apt-get update && apt-get install --only-upgrade -y ${name}`;
+  if (/^(Alpine|Wolfi|Chainguard)/.test(eco)) return `apk upgrade --no-cache ${name}`;
+  if (isDistro(eco)) return `dnf upgrade -y ${name}`;
+  return undefined;
 }
 
 export function ticketTitle(f: Finding): string {

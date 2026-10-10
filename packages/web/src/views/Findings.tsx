@@ -172,7 +172,7 @@ function Detail({ f, scanId, targetId, targetName, tickets, kinds, onTicketsChan
         {path ? <PathDiagram path={path} pkg={f.component.name} /> : f.reach.callSites.length ? (
           <ul className="refs">{f.reach.callSites.map((c, i) => <li key={i}><code>{c.text}()</code> at {c.file}:{c.line}</li>)}</ul>
         ) : (
-          <p className="empty">{f.reach.importedIn.length ? `Imported in ${f.reach.importedIn.join(', ')}.` : 'Not imported by any source file.'}</p>
+          <p className="empty">{f.reach.tier === 'image-only' ? `Present in ${f.component.image ?? 'the container image'}${f.component.path && f.component.path !== f.component.name ? ` as ${(f.component.paths ?? [f.component.path]).join(', ')}` : ''}; the application code does not import it and NextFix does not trace code paths inside images.` : f.reach.importedIn.length ? `Imported in ${f.reach.importedIn.join(', ')}.` : 'Not imported by any source file.'}</p>
         )}
         {f.reach.paths.length > 1 && <p className="empty">{f.reach.paths.length} entry points reach this call, {f.reach.paths.filter((p) => p.userInput).length} carrying request data; the worst case is shown.</p>}
       </section>

@@ -1,0 +1,39 @@
+{
+  "matches": [
+    {
+      "vulnerability": { "id": "CVE-2023-5678", "dataSource": "https://example.invalid", "severity": "Medium" },
+      "artifact": {
+        "id": "a1",
+        "name": "libssl3",
+        "version": "3.0.11-1~deb12u2",
+        "type": "deb",
+        "locations": [{ "path": "/var/lib/dpkg/status" }],
+        "purl": "pkg:deb/debian/libssl3@3.0.11-1~deb12u2?arch=amd64&distro=debian-12&upstream=openssl"
+      }
+    },
+    {
+      "vulnerability": { "id": "CVE-2024-0727", "dataSource": "https://example.invalid", "severity": "Medium" },
+      "artifact": {
+        "id": "a1",
+        "name": "libssl3",
+        "version": "3.0.11-1~deb12u2",
+        "type": "deb",
+        "locations": [{ "path": "/var/lib/dpkg/status" }],
+        "purl": "pkg:deb/debian/libssl3@3.0.11-1~deb12u2?arch=amd64&distro=debian-12&upstream=openssl"
+      }
+    },
+    {
+      "vulnerability": { "id": "GHSA-29mw-wpgm-hmr9", "dataSource": "https://example.invalid", "severity": "High" },
+      "artifact": {
+        "id": "a2",
+        "name": "lodash",
+        "version": "4.17.15",
+        "type": "npm",
+        "locations": [{ "path": "/app/node_modules/lodash/package.json" }],
+        "purl": "pkg:npm/lodash@4.17.15"
+      }
+    }
+  ],
+  "source": { "type": "image", "target": { "userInput": "example/shop:1.2" } },
+  "distro": { "name": "debian", "version": "12" }
+}

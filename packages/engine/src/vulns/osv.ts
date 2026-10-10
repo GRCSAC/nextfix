@@ -1,6 +1,5 @@
-import semver from 'semver';
 import type { Advisory, Component } from '../types.ts';
-import { comparePep440, validPep440 } from './pep440.ts';
+import { compareVersions, osvQueryable, osvVersion, validVersion } from './ecosystems.ts';
 import { normalizePyName } from '../inventory/python.ts';
 import { Cache, DAY } from './cache.ts';
 import { cvss3BaseScore, severityLabelFromScore } from './cvss.ts';
@@ -38,7 +37,8 @@ export async function fetchAdvisories(components: Component[], opts: OsvOptions)
   // 1. Which components have any advisories? (batch query)
   const pending: Component[] = [];
   for (const c of components) {
-    const cached = opts.cache.get<{ id: string; modified?: string }[]>(`osv:query:${c.purl}`, opts.offline);
+    if (!osvQueryable(c.ecosystem)) continue;
+    const cached = opts.cache.get<{ id: string; modified?: string }[]>(queryKey(c), opts.offline);
     if (cached) idsByPurl.set(c.purl, cached);
     else pending.push(c);
   }
@@ -49,7 +49,7 @@ export async function fetchAdvisories(components: Component[], opts: OsvOptions)
     const chunk = pending.slice(i, i + 500);
     opts.log?.(`OSV: querying ${chunk.length} component(s)…`);
     const body = {
-      queries: chunk.map((c) => ({ package: { name: c.name, ecosystem: c.ecosystem }, version: c.version })),
+      queries: chunk.map((c) => ({ package: { name: c.name, ecosystem: c.ecosystem }, version: osvVersion(c.ecosystem, c.version) })),
     };
     const res = await fetch(`${OSV}/querybatch`, {
       method: 'POST',
@@ -62,7 +62,7 @@ export async function fetchAdvisories(components: Component[], opts: OsvOptions)
       const c = chunk[idx]!;
       const vulns = r.vulns ?? [];
       idsByPurl.set(c.purl, vulns);
-      opts.cache.set(`osv:query:${c.purl}`, vulns, DAY);
+      opts.cache.set(queryKey(c), vulns, DAY);
     });
   }
 
@@ -77,10 +77,33 @@ export async function fetchAdvisories(components: Component[], opts: OsvOptions)
       throw new Error(`Offline mode: advisory ${id} is not cached.`);
     }
     const res = await fetch(`${OSV}/vulns/${encodeURIComponent(id)}`, { headers: { 'user-agent': USER_AGENT } });
+    if (res.status === 404) {
+      const missing: OsvVuln = { id, modified: 'missing' };
+      opts.cache.set(key, missing, 7 * DAY);
+      return missing;
+    }
     if (!res.ok) throw new Error(`OSV vuln ${id} failed: ${res.status}`);
     const v = (await res.json()) as OsvVuln;
     opts.cache.set(key, v, 7 * DAY);
     return v;
+  }
+
+  // Distribution advisories (DEBIAN-, UBUNTU-, ALPINE-…) often carry no severity or summary of
+  // their own; the CVE record in OSV does. Fill the gaps from it when possible.
+  async function enrich(v: OsvVuln): Promise<OsvVuln> {
+    const cve = cveOf(v);
+    if (!cve || cve === v.id || (v.severity?.length && v.summary)) return v;
+    let rec = vulnCache.get(cve);
+    if (!rec) {
+      try {
+        rec = await getVuln(cve);
+      } catch {
+        return v;
+      }
+      vulnCache.set(cve, rec);
+    }
+    if (rec.modified === 'missing') return v;
+    return { ...v, severity: v.severity?.length ? v.severity : rec.severity, summary: v.summary || rec.summary, details: v.details || rec.details };
   }
 
   for (const c of components) {
@@ -90,7 +113,7 @@ export async function fetchAdvisories(components: Component[], opts: OsvOptions)
     for (const ref of refs) {
       let v = vulnCache.get(ref.id);
       if (!v) {
-        v = await getVuln(ref.id, ref.modified);
+        v = await enrich(await getVuln(ref.id, ref.modified));
         vulnCache.set(ref.id, v);
       }
       advisories.push(toAdvisory(v, c));
@@ -101,9 +124,23 @@ export async function fetchAdvisories(components: Component[], opts: OsvOptions)
   return out;
 }
 
+/** npm and PyPI keep their purl-based cache keys; everything else is keyed by what is actually queried. */
+function queryKey(c: Component): string {
+  return c.ecosystem === 'npm' || c.ecosystem === 'PyPI' ? `osv:query:${c.purl}` : `osv:query:${c.ecosystem}|${c.name}|${c.version}`;
+}
+
+/** The CVE behind an advisory: a CVE alias, or the CVE embedded in a distribution id (`DEBIAN-CVE-2023-5678`). */
+function cveOf(v: OsvVuln): string | undefined {
+  for (const id of [v.id, ...(v.aliases ?? [])]) {
+    const m = /(?:^|-)(CVE-\d{4}-\d{4,})$/.exec(id);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
 function toAdvisory(v: OsvVuln, c: Component): Advisory {
   const aliases = v.aliases ?? [];
-  const cve = [v.id, ...aliases].find((a) => a.startsWith('CVE-'));
+  const cve = cveOf(v);
   const vec = v.severity?.find((s) => s.type === 'CVSS_V3')?.score ?? v.severity?.[0]?.score;
   const score = vec ? cvss3BaseScore(vec) : undefined;
   return {
@@ -127,13 +164,15 @@ function lowestFix(v: OsvVuln, c: Component): string | undefined {
   let best: string | undefined;
   const py = c.ecosystem === 'PyPI';
   const sameName = (n: string | undefined) => (py ? normalizePyName(n ?? '') === c.name : n === c.name);
-  const gt = (a: string, b: string) => (py ? comparePep440(a, b) > 0 : semver.gt(a, b));
-  const lt = (a: string, b: string) => (py ? comparePep440(a, b) < 0 : semver.lt(a, b));
+  // A component queried without a release suffix (`Debian`) matches any release's entry.
+  const sameEco = (e: string | undefined) => e === c.ecosystem || (!!e && !c.ecosystem.includes(':') && e.split(':')[0] === c.ecosystem);
+  const gt = (a: string, b: string) => compareVersions(c.ecosystem, a, b) > 0;
+  const lt = (a: string, b: string) => compareVersions(c.ecosystem, a, b) < 0;
   for (const a of v.affected ?? []) {
-    if (a.package?.ecosystem !== c.ecosystem || !sameName(a.package.name)) continue;
+    if (!sameEco(a.package?.ecosystem) || !sameName(a.package?.name)) continue;
     for (const r of a.ranges ?? []) {
       for (const e of r.events) {
-        const f = e.fixed && (py ? (validPep440(e.fixed) ? e.fixed : null) : semver.valid(e.fixed));
+        const f = e.fixed && validVersion(c.ecosystem, e.fixed) ? e.fixed : undefined;
         if (f && gt(f, c.version) && (!best || lt(f, best))) best = f;
       }
     }

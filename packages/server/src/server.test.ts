@@ -51,7 +51,7 @@ function fakeReport(): ScanReport {
     tool: { name: 'NextFix', version: '0.0.0-test' },
     target: { dir: 'C:/x/express-shop', name: 'express-shop' },
     generatedAt: new Date().toISOString(),
-    summary: { components: 1, advisories: 1, findings: 1, byDecision: { Act: 1, Attend: 0, 'Track*': 0, Track: 0 }, byTier: { reachable: 1, 'called-unreached': 0, 'imported-unknown-symbol': 0, 'imported-not-called': 0, unused: 0, 'dev-only': 0 }, noiseRemoved: 0 },
+    summary: { components: 1, advisories: 1, findings: 1, byDecision: { Act: 1, Attend: 0, 'Track*': 0, Track: 0 }, byTier: { reachable: 1, 'called-unreached': 0, 'imported-unknown-symbol': 0, 'image-only': 0, 'imported-not-called': 0, unused: 0, 'dev-only': 0 }, noiseRemoved: 0 },
     exposure: finding.exposure,
     entryPoints: [entry],
     components: [component],

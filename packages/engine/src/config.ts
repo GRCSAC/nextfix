@@ -11,6 +11,16 @@ export interface ProjectConfig {
   ignore?: string[];
   /** Routes that are known to be internal-only, e.g. ["GET /healthz"]; they are treated as authenticated. */
   internalRoutes?: string[];
+  /** Container image reference(s) to inventory with syft, e.g. "ghcr.io/org/app:1.4". */
+  image?: string | string[];
+  /** SBOM file(s) to read instead of, or as well as, an image: CycloneDX JSON, SPDX JSON or a Grype report. */
+  sbom?: string | string[];
+  /** Path to the syft binary when it is not on the PATH. */
+  syft?: string;
+}
+
+export function asList(v: string | string[] | undefined): string[] {
+  return v === undefined ? [] : Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()) : typeof v === 'string' && v.trim() ? [v] : [];
 }
 
 export function loadConfig(rootDir: string): ProjectConfig {
