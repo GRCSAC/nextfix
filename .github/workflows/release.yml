@@ -128,6 +128,9 @@ jobs:
       - name: Build and push (linux/amd64, linux/arm64)
         id: push
         uses: docker/build-push-action@v6
+        env:
+          # The build record artifact is not a release asset; keeping it out keeps the release job's downloads clean.
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: packaging/Dockerfile
@@ -190,7 +193,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@v4
         with:
+          pattern: nextfix-*
           path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-sbom
+          path: artifacts/image-sbom
+      - uses: actions/download-artifact@v4
+        with:
+          name: self-scan
+          path: artifacts/self-scan
       - name: Assemble release assets
         env:
           VERSION: ${{ needs.check.outputs.version }}
