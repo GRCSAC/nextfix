@@ -10,8 +10,8 @@ The repository opens on the owner's word after 1.0. Each line names who does it.
 - [ ] `node packages/engine/src/cli.ts scan . --fail-on Act` passes on the repository itself
       (the release workflow runs it; a failure blocks the release).
 - [ ] History reviewed once more: no attribution trailers, no internal paths, no secrets
-      (`git log --format=%B | grep -iE "co-authored|generated"` is empty; `out/` and
-      editor folders are ignored; the scrub grep in docs/CONVENTIONS.md returns nothing).
+      (`git log --format=%B | grep -iE "co-authored|generated"` is empty; `out/` and editor
+      folders are ignored; the scrub grep in docs/CONVENTIONS.md returns nothing).
 - [ ] README version line matches the tag (`scripts/set-version.mjs` keeps it so).
 - [ ] SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, issue and pull-request templates
       present (they are).
