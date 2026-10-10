@@ -66,6 +66,18 @@ Known open: Django/DRF `permission_classes` as class attributes, Flask-RESTful /
 resource classes, Starlette-only apps, Tornado; method calls on framework objects
 (`request.get_host()`) cannot be matched to derived symbols.
 
+## Before going public (decided 2026-10-09)
+
+The repository opens once the five remaining feature-table items are done, in this order:
+
+1. Jira and GitHub Issues export (0.7)
+2. Container image inventory through a Syft/Grype adapter (0.8)
+3. Go via govulncheck (0.9)
+4. Team features: local accounts, roles, audit log, API tokens, OIDC (0.10)
+5. Packaging: single executable per platform, Docker image, Windows installer (1.0)
+
+The trademark filing package is in `docs/TRADEMARK.md`; filing is the applicant's own step.
+
 ## 0.7 — Team features (open, in this repo)
 
 - OIDC single sign-on, local accounts fallback.
