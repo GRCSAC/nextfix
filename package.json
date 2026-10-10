@@ -1,6 +1,6 @@
 {
   "name": "nextfix",
-  "version": "0.10.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "description": "NextFix — tells you what to fix next, and why. Reachability- and exposure-aware prioritization for application vulnerabilities.",
   "type": "module",
@@ -15,9 +15,17 @@
     "dev:web": "npm run dev -w packages/web",
     "typecheck": "tsc -p packages/engine/tsconfig.json && tsc -p packages/server/tsconfig.json && tsc -p packages/web/tsconfig.json",
     "test": "npm test --workspaces --if-present",
-    "version:sync": "node scripts/set-version.mjs"
+    "version:sync": "node scripts/set-version.mjs",
+    "build:bundle": "node packaging/build-sea.mjs --bundle-only",
+    "build:bin": "npm run build && node packaging/build-sea.mjs",
+    "build:docker": "docker build -t nextfix:dev -f packaging/Dockerfile .",
+    "release:notes": "node packaging/release-notes.mjs"
   },
   "engines": {
     "node": ">=24"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
   }
 }

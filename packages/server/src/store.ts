@@ -1,10 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { homedir, hostname } from 'node:os';
+import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Decision, ReachTier, ScanReport, ScanSummary } from '../../engine/src/types.ts';
 import { featureMigrations } from './features/all.ts';
+import { nextfixHome } from '../../engine/src/home.ts';
 
 export interface TargetRow {
   id: number;
@@ -83,7 +84,7 @@ export interface StoreOptions {
 export const LOCK_STALE_MS = 60_000;
 
 export function defaultDbPath(): string {
-  return join(homedir(), '.nextfix', 'nextfix.sqlite');
+  return join(nextfixHome(), 'nextfix.sqlite');
 }
 
 /**

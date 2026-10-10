@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.10.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v1.0.0-rc.1` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -219,6 +219,8 @@ binary, and npm's own bundled dependencies, which produce the `image-only` findi
 ## Run it
 
 Requires Node 24+ (the engine and server run TypeScript directly; only the UI is bundled).
+Without Node: the single executable and the Docker image are described in
+[docs/INSTALL.md](docs/INSTALL.md), with upgrades, backups and reverse-proxy setup.
 
 ```bash
 npm install
@@ -229,8 +231,8 @@ npm run typecheck            # engine + server + web
 ```
 
 Scan history lives in `~/.nextfix/nextfix.sqlite`; advisory caches in `~/.nextfix/cache.sqlite`.
-`nextfix-server serve --host 0.0.0.0` exposes the dashboards to the LAN (no accounts yet; see
-roadmap). The server answers only to `localhost`, `127.0.0.1`, the `--host` value and any
+`nextfix serve --host 0.0.0.0` exposes the dashboards to the LAN; accounts, roles and single
+sign-on are built in, and the first visit from the server's own machine creates the admin. The server answers only to `localhost`, `127.0.0.1`, the `--host` value and any
 `--allow-host <name>` you add, and refuses state-changing requests from other origins, so a
 web page cannot drive it. Run one server per database: a second one sees the first in the
 header and waits for its scans.
@@ -303,7 +305,7 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Jira / GitHub Issues export (per finding and bulk, links remembered) | ✅ |
 | CI gate (`--fail-on`, exit codes) | ✅ |
 | SARIF 2.1.0 output, GitHub Actions template with pull-request comment (docs/ci) | ✅ |
-| Packaging: single executable + Docker image | ⬜ |
+| Packaging: single executable per platform, Docker image with syft, signed release pipeline (docs/INSTALL.md) | ✅ |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.
 

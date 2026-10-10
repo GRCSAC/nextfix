@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+
+PackageIdentifier: GRCSAC.NextFix
+PackageVersion: __VERSION__
+# winget refuses to install below this, so it must not promise less than the installer does
+# (MinVersion=10.0 in packaging/windows/nextfix.iss).
+MinimumOSVersion: 10.0.10240.0
+InstallerType: inno
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+ReleaseDate: __DATE__
+Installers:
+  - Architecture: x64
+    InstallerUrl: __URL__
+    InstallerSha256: __SHA256__
+    # Inno's uninstall key is "{AppId}_is1". AppId is pinned in packaging/windows/nextfix.iss
+    # and never changes between versions; refresh-manifests.mjs reads it from there.
+    ProductCode: '__PRODUCT_CODE__'
+    AppsAndFeaturesEntries:
+      - DisplayName: NextFix
+        Publisher: GRCSAC
+        ProductCode: '__PRODUCT_CODE__'
+ManifestType: installer
+ManifestVersion: 1.6.0

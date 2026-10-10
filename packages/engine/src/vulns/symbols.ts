@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { readAsset } from '../assets.ts';
 import type { SymbolEntry } from '../types.ts';
 
 /** Vulnerable-symbol database: curated entries from the repo plus derived entries from this machine. */
@@ -9,8 +10,10 @@ export class SymbolDb {
     for (const e of entries) this.add(e);
   }
 
-  static load(path = new URL('../../data/vulnerable-symbols.json', import.meta.url), extra: SymbolEntry[] = []): SymbolDb {
-    const json = JSON.parse(readFileSync(path, 'utf8')) as { entries: SymbolEntry[] };
+  /** The curated database from the repo (or the executable) unless a file is given. */
+  static load(path?: string | URL, extra: SymbolEntry[] = []): SymbolDb {
+    const text = path === undefined ? readAsset('vulnerable-symbols.json').toString('utf8') : readFileSync(path, 'utf8');
+    const json = JSON.parse(text) as { entries: SymbolEntry[] };
     return new SymbolDb([...json.entries, ...extra]);
   }
 

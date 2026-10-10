@@ -5,6 +5,36 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-10
+
+The first release meant to be installed rather than cloned.
+
+### Added
+- **Windows installer.** `NextFix-Setup-<version>.exe`: per-user, no elevation, Start Menu
+  entry for the dashboards, install folder on the user PATH, a running server closed before
+  an upgrade, data kept on uninstall unless asked. Built and Authenticode-signed on the
+  owner's machine through Microsoft Trusted Signing with a release script that refuses to
+  ship unsigned; winget and Chocolatey manifests generated from the staged installer
+  (`packaging/windows`, `docs/INSTALL-WINDOWS.md`).
+- **Launch preparation.** `docs/LAUNCH.md`, Dependabot for npm and GitHub Actions,
+  CODEOWNERS.
+- **Packaging.** One executable per platform (`nextfix scan ...`, `nextfix serve ...`,
+  `nextfix user ...`) built with Node's single-executable support: the dashboard, the
+  tree-sitter WebAssembly modules, the curated symbol database and the version travel inside
+  the binary (`packaging/build-sea.mjs`, `npm run build:bin`). A Docker image
+  (`packaging/Dockerfile`) that runs the server as a non-root user with `/data` for the
+  database and caches and syft built in for image scans. A release workflow on `v*` tags that
+  tests, scans NextFix with itself, builds the executables on Linux, Windows and macOS,
+  publishes the image to GHCR signed with cosign, attaches its SBOM and `SHA256SUMS`, and takes
+  the release notes from this file. `docs/INSTALL.md` covers installation, upgrading, backup
+  and restore, and running behind a reverse proxy.
+- `NEXTFIX_HOME` moves the whole state folder (database, advisory cache, derived symbols)
+  away from `~/.nextfix`.
+
+### Changed
+- Run-time files are located through one helper (`packages/engine/src/assets.ts`) that reads
+  them from the executable, from an `assets/` folder beside the bundle, or from the source tree.
+
 ## [0.10.0] — 2026-10-10
 
 The team release. Everything ships in this repository under the same licence.

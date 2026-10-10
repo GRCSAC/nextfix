@@ -1,0 +1,18 @@
+# Build context for packaging/Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
+# The image is built from a clean checkout: dependencies are installed and the dashboard
+# and bundle are built inside the build stage.
+.git
+.github
+node_modules
+**/node_modules
+dist
+dist-bin
+dist-bundle
+out
+packages/web/dist
+samples
+packaging/windows
+*.log
+.env
+.DS_Store
+Thumbs.db

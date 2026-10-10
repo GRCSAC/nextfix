@@ -141,16 +141,16 @@ Should selling support or a hosted edition ever become interesting, the Apache-2
 does not prevent it and nothing shipped free is taken back; the "team edition" phase below
 simply becomes features in the open repo.
 
-## 1.0 — Ship
+## 1.0 — Ship (built 2026-10-10)
 
-- Single executable per platform (Node single-executable application) and a Docker image
-  on GitHub's container registry, signed with cosign.
+- Single executable per platform (Node single-executable application; `nextfix scan`,
+  `nextfix serve`, `nextfix user`) and a Docker image on GitHub's container registry, signed
+  with cosign, with syft built in. `docs/INSTALL.md`.
 - Installer for Windows like NetVane, Authenticode-signed through Microsoft Trusted Signing
-  (CN=GRCSAC, the same account and fail-closed release script as NetVane); `winget` +
-  Chocolatey.
-- One release workflow: build matrix, tests, NextFix scanning itself with `--fail-on Act`,
-  assets attached, notes from the changelog.
-- Website `nextfix.grcsac.com` (brand kit in `docs/BRAND.md`); open edition free, team
-  edition priced per application count.
-- Launch-day evidence of first use of the NextFix™ mark saved (see `docs/TRADEMARK.md`),
-  then flip the repo public.
+  on the owner's machine (CN=GRCSAC, fail-closed release script); winget and Chocolatey
+  manifests generated per release. `docs/INSTALL-WINDOWS.md`.
+- One release workflow on `v*` tags: tests, NextFix scanning itself with `--fail-on Act`,
+  five executables, the image, SBOM, checksums, notes from the changelog.
+- Launch: `docs/LAUNCH.md`. Website `nextfix.grcsac.com` updated (brand kit in
+  `docs/BRAND.md`); everything free. Launch-day evidence of first use of the NextFix™ mark
+  saved (see `docs/TRADEMARK.md`), then the repository goes public on the owner's word.

@@ -1,16 +1,15 @@
-import { createRequire } from 'node:module';
 import { Parser, Language, type Node, type Tree } from 'web-tree-sitter';
+import { readAsset } from '../../assets.ts';
 
-const require = createRequire(import.meta.url);
 let ready: Promise<Parser> | undefined;
 
 /** One shared Python parser (tree-sitter via WebAssembly, no native build). */
 export function pythonParser(): Promise<Parser> {
   if (!ready) {
     ready = (async () => {
-      await Parser.init();
-      const wasm = require.resolve('tree-sitter-python/tree-sitter-python.wasm');
-      const lang = await Language.load(wasm);
+      // Both wasm modules come from the asset store, so the same code runs from source and from the executable.
+      await Parser.init({ wasmBinary: readAsset('tree-sitter.wasm') });
+      const lang = await Language.load(readAsset('tree-sitter-python.wasm'));
       const p = new Parser();
       p.setLanguage(lang);
       return p;

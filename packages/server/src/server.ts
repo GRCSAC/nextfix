@@ -2,11 +2,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { scan, type ScanOptions } from '../../engine/src/scan.ts';
 import { toOpenVex } from '../../engine/src/report/vex.ts';
 import { toolVersion } from '../../engine/src/version.ts';
+import { assetPath, hasAsset, isSea, readAsset } from '../../engine/src/assets.ts';
 import { defaultCachePath } from '../../engine/src/vulns/cache.ts';
 import { hasPythonProject } from '../../engine/src/inventory/python.ts';
 import { hasNodeProject } from '../../engine/src/inventory/node.ts';
@@ -187,8 +187,9 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-export function defaultStaticDir(): string {
-  return fileURLToPath(new URL('../../web/dist/', import.meta.url));
+/** The built dashboard on disk; undefined inside the single executable, where it is read from the embedded assets. */
+export function defaultStaticDir(): string | undefined {
+  return isSea() ? undefined : assetPath('web');
 }
 
 export function createNextFixServer(opts: ServerOptions) {
@@ -874,15 +875,26 @@ export function createNextFixServer(opts: ServerOptions) {
   }
 
   function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
-    let file = normalize(join(staticDir, path === '/' ? 'index.html' : path));
-    if (!file.startsWith(normalize(staticDir))) return send(res, 403, 'Forbidden');
-    if (!existsSync(file) || statSync(file).isDirectory()) file = join(staticDir, 'index.html');
-    if (!existsSync(file)) {
+    let name = path === '/' ? 'index.html' : path.replace(/^\/+/, '');
+    let body: Buffer | undefined;
+    if (staticDir) {
+      let file = normalize(join(staticDir, name));
+      if (!file.startsWith(normalize(staticDir))) return send(res, 403, 'Forbidden');
+      if (!existsSync(file) || statSync(file).isDirectory()) {
+        file = join(staticDir, 'index.html');
+        name = 'index.html';
+      }
+      if (existsSync(file)) body = readFileSync(file);
+    } else {
+      // Embedded in the executable: exact keys only, so a path with ".." simply falls back to the app shell.
+      if (!hasAsset(`web/${name}`)) name = 'index.html';
+      if (hasAsset(`web/${name}`)) body = readAsset(`web/${name}`);
+    }
+    if (body === undefined) {
       return send(res, 200, '<!doctype html><meta charset="utf-8"><title>NextFix</title><body style="font-family:system-ui;padding:2rem"><h1>NextFix</h1><p>The dashboard has not been built yet. Run <code>npm run build</code> in the repo, then reload.</p><p>The API is live at <code>/api/health</code>.</p>', { 'content-type': 'text/html; charset=utf-8' });
     }
-    const ext = extname(file).toLowerCase();
-    const isAsset = file.includes(`${normalize('/assets/')}`) || file.includes('\\assets\\');
-    let body = readFileSync(file);
+    const ext = extname(name).toLowerCase();
+    const isAsset = name.startsWith('assets/') || name.includes('/assets/');
     const headers: Record<string, string> = { 'content-type': MIME[ext] ?? 'application/octet-stream', 'cache-control': isAsset ? 'public, max-age=3600' : 'no-cache' };
     if (COMPRESSIBLE.has(ext) && body.length >= GZIP_MIN_BYTES && acceptsGzip(req)) {
       body = gzipSync(body);

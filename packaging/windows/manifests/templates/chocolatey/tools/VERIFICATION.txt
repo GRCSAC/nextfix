@@ -1,0 +1,66 @@
+VERIFICATION
+============
+
+Verification is intended to assist the Chocolatey moderators and end users in verifying that
+this package's contents are trustworthy.
+
+This package does NOT embed any binary. It downloads the official installer from the NextFix
+GitHub release over HTTPS and verifies it against the checksum in tools/chocolateyinstall.ps1
+before running it.
+
+Package:   nextfix __VERSION__
+Publisher: GRCSAC (GRCSAC LLC)
+Software:  https://nextfix.grcsac.com
+Source:    https://github.com/GRCSAC/nextfix (Apache-2.0)
+
+DOWNLOAD LOCATION
+-----------------
+  __URL__
+
+This URL is version-pinned: each release is published at its own URL and the file behind it
+does not change when a new version ships.
+
+CHECKSUM
+--------
+  Type:   SHA256
+  Value:  __SHA256__
+
+To verify for yourself:
+
+  1. Download the installer from the URL above.
+  2. Compute its checksum:
+
+       Get-FileHash .\NextFix-Setup-__VERSION__.exe -Algorithm SHA256
+
+     or, using the Chocolatey tooling:
+
+       checksum -t sha256 -f .\NextFix-Setup-__VERSION__.exe
+
+  3. Compare it against the value above and against the SHA256SUMS file attached to the same
+     GitHub release (https://github.com/GRCSAC/nextfix/releases/tag/v__VERSION__).
+
+AUTHENTICODE SIGNATURE
+----------------------
+The installer, and the nextfix.exe it installs, are Authenticode-signed through Microsoft
+Trusted Signing. You can confirm the publisher independently of any checksum:
+
+  Get-AuthenticodeSignature .\NextFix-Setup-__VERSION__.exe | Format-List Status, SignerCertificate
+
+Expected:
+
+  Status:  Valid
+  Subject: CN=GRCSAC, O=GRCSAC, L=Union Beach, S=New Jersey, C=US
+  Issuer:  O=Microsoft Corporation, C=US
+
+The subject is the value to check: it is the publisher identity and does not change between
+releases. The issuer's common name is deliberately not quoted here: Microsoft Trusted Signing
+rotates its intermediate CAs ("Microsoft ID Verified CS EOC CA 03", "... CA 04" and so on)
+independently of anything the publisher controls.
+
+Trusted Signing issues short-lived certificates; the signature is timestamped, so it remains
+valid after the signing certificate itself expires.
+
+LICENSE
+-------
+NextFix is licensed under the Apache License, Version 2.0. The full text is in LICENSE.txt
+alongside this file and at https://github.com/GRCSAC/nextfix/blob/main/LICENSE.

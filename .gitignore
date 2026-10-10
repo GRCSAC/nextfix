@@ -5,3 +5,7 @@ dist/
 .env
 .DS_Store
 Thumbs.db
+
+# Packaging output (packaging/build-sea.mjs)
+dist-bin/
+dist-bundle/

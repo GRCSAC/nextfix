@@ -1,10 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { readAsset } from './assets.ts';
 
-/** Single source of truth: the repo root package.json. Stamped into every report. */
+let cached: string | undefined;
+
+/** Single source of truth: the repo root package.json (embedded in the executable). Stamped into every report. */
 export function toolVersion(): string {
-  const url = new URL('../../../package.json', import.meta.url);
-  const pkg = JSON.parse(readFileSync(url, 'utf8')) as { version?: string };
-  return pkg.version ?? '0.0.0';
+  if (cached === undefined) {
+    const pkg = JSON.parse(readAsset('package.json').toString('utf8')) as { version?: string };
+    cached = pkg.version ?? '0.0.0';
+  }
+  return cached;
 }
 
 export const USER_AGENT = `NextFix/${toolVersion()} (+https://github.com/GRCSAC/nextfix)`;

@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { nextfixHome } from '../home.ts';
 
 /** Small TTL key/value cache on SQLite so repeat scans and offline runs do not hit the network. */
 export class Cache {
@@ -48,7 +48,7 @@ export class Cache {
 }
 
 export function defaultCachePath(): string {
-  return join(homedir(), '.nextfix', 'cache.sqlite');
+  return join(nextfixHome(), 'cache.sqlite');
 }
 
 export const HOUR = 3_600_000;

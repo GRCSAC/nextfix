@@ -24,3 +24,5 @@ jobs:
       - run: npm run build
       - name: CLI usage and exit codes
         run: node packages/engine/src/cli.ts --help
+      - name: Single executable builds and reports its version
+        run: node packaging/build-sea.mjs
