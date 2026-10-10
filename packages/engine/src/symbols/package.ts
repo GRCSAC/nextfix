@@ -29,16 +29,57 @@ function normalize(p: string): string {
   return out.join('/');
 }
 
+/** How one language's files are parsed and how its import specifiers map to paths. */
+export interface LangAdapter {
+  analyze(text: string, path: string): FileFacts | Promise<FileFacts>;
+  /** Candidate paths for `spec` imported from `fromPath`, most likely first; empty when not a local import. */
+  candidates(fromPath: string, spec: string): string[];
+}
+
+export const jsAdapter: LangAdapter = {
+  analyze: (text, path) => analyzeFile(text, path),
+  candidates(fromPath, spec) {
+    if (!spec.startsWith('.') && !spec.startsWith('/')) return [];
+    const base = normalize(`${dirname(fromPath)}/${spec}`);
+    const order = /\.[cm]?[jt]sx?$/.test(spec) ? ['', ...EXTS.filter((e) => e)] : EXTS;
+    return order.map((ext) => normalize(base + ext));
+  },
+};
+
+/** Python: `.x` / `..y` relative to the file's package, `pkg.sub` relative to the package root. */
+export function pyAdapter(packageRoot: string, analyze: LangAdapter['analyze']): LangAdapter {
+  return {
+    analyze,
+    candidates(fromPath, spec) {
+      let base: string;
+      const m = /^(\.+)(.*)$/.exec(spec);
+      if (m) {
+        let dir = dirname(fromPath);
+        for (let i = 1; i < m[1]!.length; i++) dir = dirname(dir);
+        base = normalize(`${dir}/${(m[2] ?? '').replace(/\./g, '/')}`);
+      } else {
+        base = normalize(`${packageRoot}/${spec.replace(/\./g, '/')}`);
+        // Python 2 implicit relative imports (`from loader import *` inside a package)
+        const sibling = normalize(`${dirname(fromPath)}/${spec.replace(/\./g, '/')}`);
+        return [`${base}.py`, `${base}/__init__.py`, `${sibling}.py`, `${sibling}/__init__.py`];
+      }
+      return [`${base}.py`, `${base}/__init__.py`];
+    },
+  };
+}
+
 /** A package's source files inside a repository at one ref, loaded lazily and bounded. */
 export class PackageGraph {
   private files = new Map<string, PkgFile | null>();
   private fetches = 0;
   private fetch: Fetch;
+  private lang: LangAdapter;
   readonly maxFiles: number;
 
-  constructor(fetch: Fetch, maxFiles = 200) {
+  constructor(fetch: Fetch, maxFiles = 200, lang: LangAdapter = jsAdapter) {
     this.fetch = fetch;
     this.maxFiles = maxFiles;
+    this.lang = lang;
   }
 
   /** Files actually loaded (misses are not counted). */
@@ -62,7 +103,7 @@ export class PackageGraph {
       this.files.set(p, null);
       return undefined;
     }
-    const facts = analyzeFile(text, p);
+    const facts = await this.lang.analyze(text, p);
     const file: PkgFile = { path: p, facts, imports: new Map(), reexports: new Map() };
     this.files.set(p, file);
     return file;
@@ -86,13 +127,9 @@ export class PackageGraph {
   }
   private linked = new Set<string>();
 
-  /** Resolves a relative specifier to a path that exists in the repo. */
+  /** Resolves an import specifier to a path that exists in the repo. */
   async resolve(fromPath: string, spec: string): Promise<string | undefined> {
-    if (!spec.startsWith('.') && !spec.startsWith('/')) return undefined;
-    const base = normalize(`${dirname(fromPath)}/${spec}`);
-    const order = /\.[cm]?[jt]sx?$/.test(spec) ? ['', ...EXTS.filter((e) => e)] : EXTS;
-    for (const ext of order) {
-      const cand = normalize(base + ext);
+    for (const cand of this.lang.candidates(fromPath, spec)) {
       if (cand === fromPath) continue;
       if (this.files.has(cand)) {
         if (this.files.get(cand)) return cand;
@@ -161,6 +198,23 @@ export async function findPackage(graph: { fetchText: Fetch }, touched: string, 
   return undefined;
 }
 
+/**
+ * Python: the top-most package directory containing `touched` (walking up while __init__.py
+ * exists), its entry `__init__.py`, and the root the package lives under (for absolute imports).
+ */
+export async function findPythonPackage(exists: (p: string) => Promise<boolean>, touched: string): Promise<{ packageRoot: string; entry: string } | undefined> {
+  let dir = dirname(touched);
+  let top: string | undefined;
+  for (let i = 0; i < 8 && dir !== undefined; i++) {
+    if (!(await exists(`${dir}/__init__.py`))) break;
+    top = dir;
+    if (!dir.includes('/')) break;
+    dir = dirname(dir);
+  }
+  if (!top) return undefined;
+  return { packageRoot: dirname(top), entry: `${top}/__init__.py` };
+}
+
 export interface CrossFileResult {
   entry: string;
   /** public symbol of the package -> how it was reached */
@@ -176,11 +230,15 @@ export async function resolveAcrossFiles(graph: PackageGraph, entry: string, sta
   const entryFile = await graph.load(entry);
   if (!entryFile) return undefined;
 
-  // Import graph from the entry: importer -> [target]; and reverse.
+  // Import graph from the entry: importer -> [target]; and reverse. Package index files and
+  // files near the changed one are visited first so a bounded walk still finds the chain.
   const importers = new Map<string, Set<string>>();
   const seen = new Set<string>();
+  const startDir = dirname(startPath);
+  const priority = (p: string) => (/(^|\/)(__init__\.py|index\.[cm]?[jt]sx?)$/.test(p) ? 0 : 1) + (p.startsWith(startDir + '/') || dirname(p) === startDir ? 0 : 2);
   const queue = [entry];
   while (queue.length) {
+    queue.sort((a, b) => priority(a) - priority(b));
     const p = queue.shift()!;
     if (seen.has(p)) continue;
     seen.add(p);
@@ -229,7 +287,10 @@ export async function resolveAcrossFiles(graph: PackageGraph, entry: string, sta
       else if (re) for (const { exported, imported } of re) if (imported === '*' || pubs.has(imported)) nextDirect.add(exported);
       // Imports: local bindings of the importer that refer to our public names.
       for (const b of imp.imports.get(path) ?? []) {
-        if (b.imported === '*' || (b.imported === 'default' && pubs.has('default')) || pubs.has(b.imported)) nextLocals.add(b.local);
+        if (b.local === '*') {
+          // `from .x import *`: every public name becomes a local of the importer
+          for (const [p] of pubs) nextLocals.add(p);
+        } else if (b.imported === '*' || (b.imported === 'default' && pubs.has('default')) || pubs.has(b.imported)) nextLocals.add(b.local);
       }
       if (!nextLocals.size && !nextDirect.size) continue;
       work.push({ path: importer, locals: nextLocals, direct: nextDirect, via: `${via} → ${importer}`, depth: depth + 1 });

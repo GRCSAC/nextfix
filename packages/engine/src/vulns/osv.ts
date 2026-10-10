@@ -1,5 +1,7 @@
 import semver from 'semver';
 import type { Advisory, Component } from '../types.ts';
+import { comparePep440, validPep440 } from './pep440.ts';
+import { normalizePyName } from '../inventory/python.ts';
 import { Cache, DAY } from './cache.ts';
 import { cvss3BaseScore, severityLabelFromScore } from './cvss.ts';
 import { USER_AGENT } from '../version.ts';
@@ -47,7 +49,7 @@ export async function fetchAdvisories(components: Component[], opts: OsvOptions)
     const chunk = pending.slice(i, i + 500);
     opts.log?.(`OSV: querying ${chunk.length} component(s)…`);
     const body = {
-      queries: chunk.map((c) => ({ package: { name: c.name, ecosystem: 'npm' }, version: c.version })),
+      queries: chunk.map((c) => ({ package: { name: c.name, ecosystem: c.ecosystem }, version: c.version })),
     };
     const res = await fetch(`${OSV}/querybatch`, {
       method: 'POST',
@@ -123,12 +125,16 @@ function toAdvisory(v: OsvVuln, c: Component): Advisory {
 
 function lowestFix(v: OsvVuln, c: Component): string | undefined {
   let best: string | undefined;
+  const py = c.ecosystem === 'PyPI';
+  const sameName = (n: string | undefined) => (py ? normalizePyName(n ?? '') === c.name : n === c.name);
+  const gt = (a: string, b: string) => (py ? comparePep440(a, b) > 0 : semver.gt(a, b));
+  const lt = (a: string, b: string) => (py ? comparePep440(a, b) < 0 : semver.lt(a, b));
   for (const a of v.affected ?? []) {
-    if (a.package?.ecosystem !== 'npm' || a.package.name !== c.name) continue;
+    if (a.package?.ecosystem !== c.ecosystem || !sameName(a.package.name)) continue;
     for (const r of a.ranges ?? []) {
       for (const e of r.events) {
-        const f = e.fixed && semver.valid(e.fixed);
-        if (f && semver.gt(f, c.version) && (!best || semver.lt(f, best))) best = f;
+        const f = e.fixed && (py ? (validPep440(e.fixed) ? e.fixed : null) : semver.valid(e.fixed));
+        if (f && gt(f, c.version) && (!best || lt(f, best))) best = f;
       }
     }
   }

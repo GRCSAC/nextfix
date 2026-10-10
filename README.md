@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.5.2` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.6.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -39,7 +39,8 @@ Dark by default, light and match-OS in Settings; works at phone width.
 
 ## The command line
 
-Point it at a Node.js project with a `package-lock.json`:
+Point it at a Node.js project with a `package-lock.json`, or a Python project with pinned
+requirements or a lockfile (or both in one folder):
 
 ```bash
 node packages/engine/src/cli.ts scan samples/express-shop --json out/report.json --vex out/report.openvex.json
@@ -78,13 +79,16 @@ Act · lodash@4.17.15 · CVE-2021-23337
 
 ### The pipeline
 
-1. **Inventory** — every component from `package-lock.json`, with dev / direct / transitive flags.
+1. **Inventory** — every component from `package-lock.json` and/or pinned Python
+   dependencies (`requirements*.txt`, `Pipfile.lock`, `poetry.lock`, `uv.lock`), with dev /
+   direct / transitive flags.
 2. **Advisories** — [OSV](https://osv.dev) for the advisories, [FIRST EPSS](https://www.first.org/epss/)
    for exploit probability, [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
    for confirmed in-the-wild exploitation. Cached locally in SQLite; `--offline` reuses the cache.
-3. **Code** — a call graph of your source (TypeScript compiler parser, no type-checking needed),
-   Express routes as entry points with their mount prefixes and auth guards, and a one-level
-   request-data taint hint.
+3. **Code** — a call graph of your source (TypeScript compiler parser for JavaScript and
+   TypeScript, tree-sitter for Python), entry points with their mount prefixes and auth guards
+   for Express, Fastify, Koa, Flask, FastAPI and Django, and request data traced argument by
+   argument from the handler to the vulnerable call.
 4. **Reachability** — one of six evidence-graded tiers per advisory (see below).
 5. **Exposure** — Dockerfile `EXPOSE`, compose `ports:`, and whether the app binds to loopback.
 6. **Decision** — an SSVC-style call: **Act**, **Attend**, **Track\***, **Track**, plus a 0–100 score
@@ -168,9 +172,10 @@ every tier. Its `package-lock.json` is committed; do not update its versions.
 
 ## Validation on real applications
 
-Measured 2026-10-09 on three open-source Express applications, cloned fresh, scanned with
-derivation on (NextFix 0.4.1). "Routes" is what `grep` finds in the main routes file;
-"found" is NextFix's entry points in that file.
+Measured 2026-10-09 on open-source applications, cloned fresh, scanned with derivation on.
+"Routes" is what `grep` finds in the routes files; "found" is NextFix's entry points there.
+Times are for a repeat scan with advisories cached; the first scan of a project also derives
+symbols from fix commits, which can take a few minutes for a large dependency tree.
 
 | Application | Components | Advisories | Routes / found | Act · Attend · Watch · Set aside | Scan time |
 |---|---|---|---|---|---|
@@ -179,6 +184,9 @@ derivation on (NextFix 0.4.1). "Routes" is what `grep` finds in the main routes 
 | Hackathon Starter (Express) | 689 | 2 | 102 / 89 | 0 · 0 · 0 · 2 | 1 s |
 | Fastify demo (fastify-cli, autoload, TypeScript) | 462 | 0 | 15 / 15 | — | 1 s |
 | node-typescript-koa-rest (Koa, koa-jwt) | 877 | 119 | 7 / 7 | 0 · 4 · 2 · 113 | 6 s |
+| microblog (Flask, blueprints, flask-login) | 54 | 56 | 35 / 35 | 2 · 8 · 4 · 42 | 1 s |
+| OWASP PyGoat (Django, requirements.txt) | 34 | 141 | 137 / 137 | 4 · 16 · 15 · 106 | 2 s |
+| full-stack-fastapi-template (FastAPI, uv.lock) | 134 | 0 | 23 / 23 | — | 1 s |
 
 What the first pass got wrong, and what changed because of it, is in the 0.4.1 entry of
 [CHANGELOG.md](CHANGELOG.md). What is still open: handlers NextFix cannot follow are listed
@@ -196,6 +204,9 @@ folder of challenge snippets that re-declare the server's routes without their i
 | npm lockfile inventory (v2/v3) | ✅ |
 | OSV + EPSS + KEV with local cache and offline mode | ✅ |
 | JavaScript/TypeScript call graph; Express, Fastify (incl. autoload) and Koa entry points, auth guards, mounts | ✅ |
+| Python inventory (requirements, Pipfile.lock, poetry.lock, uv.lock) + PyPI advisories | ✅ |
+| Python call graph; Flask, FastAPI and Django entry points, guards, blueprints/routers/includes | ✅ |
+| Python symbol derivation from fix commits (incl. `__init__` re-exports) | ✅ |
 | Request-data tracing, argument by argument along the path | ✅ |
 | Reachability tiers + SSVC-style decision + score | ✅ |
 | Docker / compose exposure | ✅ |
@@ -203,7 +214,6 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Vulnerable-symbol data | ✅ curated seed (7 advisories) + derived from fix commits |
 | Derived symbols from fix commits, with a review and export path | ✅ |
 | `nextfix.config.json` (auth guards, ignored dirs, internal routes) | ✅ |
-| Python (Flask / FastAPI / Django) | ⬜ |
 | Go (govulncheck wrapper) | ⬜ |
 | Web UI: Overview, Findings, Components, Evidence, Reports, Apps, Settings | ✅ |
 | Brand applied (see docs/BRAND.md) | ✅ |

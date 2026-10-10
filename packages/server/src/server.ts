@@ -6,6 +6,7 @@ import { scan } from '../../engine/src/scan.ts';
 import { toOpenVex } from '../../engine/src/report/vex.ts';
 import { toolVersion } from '../../engine/src/version.ts';
 import { defaultCachePath } from '../../engine/src/vulns/cache.ts';
+import { hasPythonProject } from '../../engine/src/inventory/python.ts';
 import { Store } from './store.ts';
 import { diffReports } from './diff.ts';
 
@@ -91,7 +92,7 @@ export function createNextFixServer(opts: ServerOptions) {
         const body = await readJson<{ dir?: string }>(req);
         const dir = body.dir ? resolve(body.dir) : '';
         if (!dir || !existsSync(dir) || !statSync(dir).isDirectory()) throw new HttpError(400, `Folder not found: ${body.dir ?? ''}`);
-        if (!existsSync(join(dir, 'package-lock.json'))) throw new HttpError(400, 'That folder has no package-lock.json. NextFix currently scans npm projects with a lockfile.');
+        if (!existsSync(join(dir, 'package-lock.json')) && !hasPythonProject(dir)) throw new HttpError(400, 'That folder has no package-lock.json and no Python requirements or lockfile. NextFix scans npm and PyPI projects with pinned dependencies.');
         const target = opts.store.upsertTarget(dir);
         const result = await runScan(target.id);
         return send(res, 201, { target: opts.store.getTarget(target.id), ...result });

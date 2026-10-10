@@ -16,7 +16,7 @@ const HELP = `NextFix ${toolVersion()} — tells you what to fix next, and why.
 
 Usage:
   nextfix scan <dir> [--json <file>] [--vex <file>] [--offline] [--no-derive] [--why N] [--quiet]
-  nextfix symbols derive <advisory-id> <package> [--force]   Derive vulnerable functions from the fix commit
+  nextfix symbols derive <advisory-id> <package> [--pypi] [--force]   Derive vulnerable functions from the fix commit
   nextfix symbols list                                        Show derived entries on this machine
   nextfix symbols confirm <advisory-id> <package>             Promote a derived entry after review
   nextfix symbols forget <advisory-id> <package>              Drop a derived entry (and retry next scan)
@@ -43,6 +43,7 @@ async function main() {
       offline: { type: 'boolean', default: false },
       'no-derive': { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
+      pypi: { type: 'boolean', default: false },
       why: { type: 'string', default: '3' },
       quiet: { type: 'boolean', default: false },
       version: { type: 'boolean', default: false },
@@ -56,7 +57,7 @@ async function main() {
   const [cmd, ...rest] = positionals;
   const log = values.quiet ? undefined : (m: string) => console.error(`· ${m}`);
 
-  if (cmd === 'symbols') return symbolsCommand(rest, { force: values.force, offline: values.offline, log });
+  if (cmd === 'symbols') return symbolsCommand(rest, { force: values.force, offline: values.offline, pypi: values.pypi, log });
 
   const dir = rest[0];
   if (values.help || cmd !== 'scan' || !dir) {
@@ -79,7 +80,7 @@ async function main() {
   if (values.vex) console.log(`OpenVEX:     ${resolve(values.vex)}`);
 }
 
-async function symbolsCommand(args: string[], opts: { force: boolean; offline: boolean; log?: (m: string) => void }) {
+async function symbolsCommand(args: string[], opts: { force: boolean; offline: boolean; pypi: boolean; log?: (m: string) => void }) {
   const [sub, id, pkg] = args;
   const cache = new Cache();
   const store = new DerivedStore(cache);
@@ -95,7 +96,7 @@ async function symbolsCommand(args: string[], opts: { force: boolean; offline: b
     }
     if (sub === 'derive' && id && pkg) {
       const adv = await fetchAdvisory(id);
-      const out = await deriveSymbols(adv, pkg, { cache, offline: opts.offline, store, force: opts.force, log: opts.log, typedReferences: adv.typedReferences, token: process.env.GITHUB_TOKEN });
+      const out = await deriveSymbols(adv, pkg, { cache, offline: opts.offline, store, force: opts.force, log: opts.log, typedReferences: adv.typedReferences, token: process.env.GITHUB_TOKEN, ecosystem: opts.pypi ? 'PyPI' : 'npm' });
       if (out.entry) {
         console.log(`${adv.id} ${pkg} → ${out.entry.symbols.join(', ')}${out.cached ? '  (cached)' : ''}`);
         if (out.entry.evidence) {

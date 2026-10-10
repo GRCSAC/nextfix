@@ -79,6 +79,7 @@ function reqParams(graph: ProjectGraph, id: string): Set<string> {
   const fn = graph.functions.get(id);
   const out = new Set<string>();
   for (const p of fn?.params ?? []) if (REQ.has(p)) out.add(p);
+  for (const p of fn?.inputParams ?? []) out.add(p);
   return out;
 }
 
@@ -104,14 +105,17 @@ function findPath(graph: ProjectGraph, start: string, sitesByFn: Map<string, Sin
         if (requireTaint && !tainted) continue;
         const hops = st.trail.map(hop(graph));
         const entered = st.inputAt >= 0 ? hops[st.inputAt] : undefined;
-        const direct = tainted && sink.site.args[idx]!.roots.some((r) => REQ.has(r));
+        const arg = sink.site.args[idx];
+        // Direct: the request data is read in the same function as the vulnerable call (or is one
+        // of that handler's own request-carrying parameters), not handed down from a caller.
+        const direct = tainted && (st.inputAt < 0 || arg!.roots.some((r) => REQ.has(r)));
         return {
           hops,
           callSite: { file: sink.file, line: sink.line, col: sink.col, text: sink.text, symbol: sink.symbol, userInput: direct },
           userInput: tainted,
           inputEntersAt: tainted && !direct && entered ? { file: entered.file, line: entered.line, name: entered.name } : undefined,
-          inputSource: tainted ? (direct ? sink.site.args[idx]!.text : st.inputSource) : undefined,
-          taintedArgument: tainted ? { index: idx, text: sink.site.args[idx]!.text } : undefined,
+          inputSource: tainted ? (direct ? arg!.origin ?? arg!.text : st.inputSource ?? arg!.origin ?? arg!.text) : undefined,
+          taintedArgument: tainted ? { index: idx, text: arg!.text } : undefined,
         };
       }
       if (!requireTaint) continue;
@@ -132,7 +136,7 @@ function findPath(graph: ProjectGraph, start: string, sitesByFn: Map<string, Sin
             const p = callee?.params[i];
             if (p && p !== '<pattern>') nextTaint.add(p);
             carried = true;
-            source ??= a.text;
+            source ??= a.origin ?? a.text;
           });
         }
       } else {

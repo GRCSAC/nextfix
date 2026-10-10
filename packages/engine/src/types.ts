@@ -1,4 +1,4 @@
-export type Ecosystem = 'npm';
+export type Ecosystem = 'npm' | 'PyPI';
 
 export interface Component {
   ecosystem: Ecosystem;

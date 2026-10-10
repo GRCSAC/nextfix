@@ -37,12 +37,13 @@ export function Components({ report, go }: { report: ScanReport; go: (page: stri
       </div>
       <div className="card table-wrap">
         <table className="tbl">
-          <thead><tr><th>Component</th><th>Version</th><th className="hide-sm">Kind</th><th>State</th><th className="num">Findings</th></tr></thead>
+          <thead><tr><th>Component</th><th>Version</th><th className="hide-sm">Ecosystem</th><th className="hide-sm">Kind</th><th>State</th><th className="num">Findings</th></tr></thead>
           <tbody>
             {rows.map(({ c, st, n }) => (
               <tr key={c.purl} className={n ? 'row' : ''} onClick={() => n && go('findings', undefined, { q: c.name })} tabIndex={n ? 0 : -1} onKeyDown={(e) => { if (n && e.key === 'Enter') go('findings', undefined, { q: c.name }); }}>
                 <td className="pkg">{c.name}</td>
                 <td className="mono">{c.version}</td>
+                <td className="hide-sm muted">{c.ecosystem}</td>
                 <td className="hide-sm muted">{c.dev ? 'dev' : c.direct ? 'direct' : 'transitive'}</td>
                 <td><span className={`state s-${st}`}>{STATE_LABEL[st]}</span></td>
                 <td className="num">{n || <span className="muted">—</span>}</td>

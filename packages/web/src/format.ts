@@ -92,6 +92,7 @@ export function severity(f: Finding): { label: string; cls: string } {
 
 export function fixCommand(f: Finding): string | undefined {
   if (!f.advisory.fixedVersion) return undefined;
+  if (f.component.ecosystem === 'PyPI') return `pip install "${f.component.name}==${f.advisory.fixedVersion}"`;
   return `npm install ${f.component.name}@${f.advisory.fixedVersion}`;
 }
 

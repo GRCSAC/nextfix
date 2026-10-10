@@ -1,10 +1,11 @@
 import type { Advisory, SymbolEntry } from '../types.ts';
 import { DAY } from '../vulns/cache.ts';
-import { parseUnifiedDiff, sourceFiles } from './diff.ts';
+import { isPython, parseUnifiedDiff, sourceFiles } from './diff.ts';
 import { fixCandidates, diffUrl, rawRef, type FixCandidate } from './fixcommits.ts';
 import { fetchDiff, fetchRaw, RateLimited, type GitHubOptions } from './github.ts';
-import { analyzeFile, enclosingAll, enclosingTopLevel, resolvePublic } from './functions.ts';
-import { PackageGraph, entryCandidates, findPackage, resolveAcrossFiles } from './package.ts';
+import { analyzeFile, enclosingAll, enclosingTopLevel, resolvePublic, type FileFacts } from './functions.ts';
+import { analyzePyFile } from './pyfunctions.ts';
+import { PackageGraph, entryCandidates, findPackage, findPythonPackage, pyAdapter, resolveAcrossFiles } from './package.ts';
 import type { DerivedStore } from './store.ts';
 
 export interface DeriveOptions extends GitHubOptions {
@@ -29,8 +30,10 @@ const MAX_ENTRY_TRIES = 4;
  * diff → touched lines → enclosing functions → public surface of that file → carried up the
  * package's import graph to the entry file's public names.
  */
-export async function deriveSymbols(advisory: Advisory, pkg: string, opts: DeriveOptions): Promise<DeriveOutcome> {
+export async function deriveSymbols(advisory: Advisory, pkg: string, opts: DeriveOptions & { ecosystem?: 'npm' | 'PyPI' }): Promise<DeriveOutcome> {
   const ids = [advisory.id, ...advisory.aliases];
+  const ecosystem = opts.ecosystem ?? 'npm';
+  const analyze = (text: string, path: string): FileFacts | Promise<FileFacts> => (isPython(path) ? analyzePyFile(text, path) : analyzeFile(text, path));
   if (!opts.force) {
     const existing = opts.store.get(advisory.id, pkg);
     if (existing) return { entry: existing, cached: true };
@@ -55,7 +58,7 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
     for (const c of candidates) {
       const diffText = await fetchDiff(diffUrl(c), opts);
       if (!diffText) continue;
-      const touched = sourceFiles(parseUnifiedDiff(diffText)).slice(0, MAX_FILES);
+      const touched = sourceFiles(parseUnifiedDiff(diffText)).filter((f) => (ecosystem === 'PyPI') === isPython(f.path)).slice(0, MAX_FILES);
       if (!touched.length) continue;
       used.push(c.url);
       repoMatch ||= c.repoMatch;
@@ -65,7 +68,7 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
       for (const f of touched) {
         const text = await fetchRaw(c.owner, c.repo, rawRef(c), f.path, opts);
         if (!text) continue;
-        const facts = analyzeFile(text, f.path);
+        const facts = await analyze(text, f.path);
         defaultCallable ||= facts.defaultIsFunction;
         const locals = new Set<string>();
         let hit = false;
@@ -109,25 +112,43 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
       if (startLocals.size) {
         const fetchText = (p: string) => fetchRaw(c.owner, c.repo, rawRef(c), p, opts);
         const first = [...startLocals.keys()][0]!;
-        const found = await findPackage({ fetchText }, first, pkg);
-        if (found) {
-          const graph = new PackageGraph(fetchText, 200);
-          const prefix = found.dir ? `${found.dir}/` : '';
-          let tries = 0;
-          for (const cand of entryCandidates(found.pkg, pkg)) {
-            const entry = prefix + cand;
-            if (!(await graph.exists(entry))) continue;
-            if (++tries > MAX_ENTRY_TRIES) break;
+        if (ecosystem === 'PyPI') {
+          const exists = async (p: string) => (await fetchText(p)) !== undefined;
+          const found = await findPythonPackage(exists, first);
+          if (found) {
+            // Python packages are large (Django: hundreds of modules); 60 prioritised files is enough
+            // to reach a package __init__ chain and keeps a derivation to a few seconds.
+            const graph = new PackageGraph(fetchText, 60, pyAdapter(found.packageRoot, analyze));
             let any = false;
             for (const [path, locals] of startLocals) {
-              const r = await resolveAcrossFiles(graph, entry, path, locals);
+              const r = await resolveAcrossFiles(graph, found.entry, path, locals);
               if (!r) continue;
               any = true;
               for (const [s, via] of r.symbols) if (!symbols.has(s) || symbols.get(s)!.startsWith('caller:')) symbols.set(s, `entry:${via}`);
             }
-            if (any) {
-              entryPath = entry;
-              break;
+            if (any) entryPath = found.entry;
+          }
+        } else {
+          const found = await findPackage({ fetchText }, first, pkg);
+          if (found) {
+            const graph = new PackageGraph(fetchText, 200);
+            const prefix = found.dir ? `${found.dir}/` : '';
+            let tries = 0;
+            for (const cand of entryCandidates(found.pkg, pkg)) {
+              const entry = prefix + cand;
+              if (!(await graph.exists(entry))) continue;
+              if (++tries > MAX_ENTRY_TRIES) break;
+              let any = false;
+              for (const [path, locals] of startLocals) {
+                const r = await resolveAcrossFiles(graph, entry, path, locals);
+                if (!r) continue;
+                any = true;
+                for (const [s, via] of r.symbols) if (!symbols.has(s) || symbols.get(s)!.startsWith('caller:')) symbols.set(s, `entry:${via}`);
+              }
+              if (any) {
+                entryPath = entry;
+                break;
+              }
             }
           }
         }
@@ -139,13 +160,13 @@ export async function deriveSymbols(advisory: Advisory, pkg: string, opts: Deriv
     throw err;
   }
 
-  if (!used.length) return fail(opts, advisory, pkg, 'fix links found but no diff could be fetched or it touched only tests/docs');
+  if (!used.length) return fail(opts, advisory, pkg, `fix links found but no diff could be fetched or it touched no ${ecosystem === 'PyPI' ? 'Python' : 'JavaScript'} source (tests, docs or native code only)`);
   if (!symbols.size && (changed.size || moduleLevel) && defaultCallable) symbols.set('default', moduleLevel && !changed.size ? 'module-level-change' : 'package-is-one-function');
   if (!symbols.size) return fail(opts, advisory, pkg, changed.size ? `fix changed internal function(s) ${[...changed].join(', ')} that no entry-file export reaches` : 'fix touched no function bodies and could not be traced to an entry export');
 
   const entry: SymbolEntry = {
     ids,
-    ecosystem: 'npm',
+    ecosystem,
     package: pkg,
     symbols: [...symbols.keys()].sort(),
     source: 'derived',

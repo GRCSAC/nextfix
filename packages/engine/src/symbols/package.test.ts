@@ -1,10 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PackageGraph, entryCandidates, resolveAcrossFiles } from './package.ts';
+import { PackageGraph, entryCandidates, findPythonPackage, pyAdapter, resolveAcrossFiles } from './package.ts';
+import { analyzePyFile } from './pyfunctions.ts';
 
 function repo(files: Record<string, string>) {
   return new PackageGraph(async (p) => files[p]);
 }
+
+test('python package: a changed constructor method resolves through star imports to load()', async () => {
+  const files: Record<string, string> = {
+    'lib/yaml/__init__.py': `from .loader import *\n\n__all__ = ['load', 'full_load', 'FullLoader']\n\ndef load(stream, Loader=None):\n    if Loader is None:\n        Loader = FullLoader\n    return Loader(stream).get_single_data()\n\ndef full_load(stream):\n    return load(stream, FullLoader)\n`,
+    'lib/yaml/loader.py': `from .constructor import *\nfrom .reader import *\n\n__all__ = ['FullLoader', 'SafeLoader']\n\nclass FullLoader(Reader, FullConstructor):\n    pass\n\nclass SafeLoader(Reader, SafeConstructor):\n    pass\n`,
+    'lib/yaml/constructor.py': `__all__ = ['BaseConstructor', 'SafeConstructor', 'FullConstructor']\n\nclass BaseConstructor:\n    def construct_object(self, node):\n        return node\n\nclass SafeConstructor(BaseConstructor):\n    pass\n\nclass FullConstructor(SafeConstructor):\n    def set_python_instance_state(self, instance, state):\n        instance.__dict__.update(state)\n`,
+    'lib/yaml/reader.py': `__all__ = ['Reader']\n\nclass Reader:\n    pass\n`,
+  };
+  const exists = async (p: string) => p in files;
+  const found = await findPythonPackage(exists, 'lib/yaml/constructor.py');
+  assert.deepEqual(found, { packageRoot: 'lib', entry: 'lib/yaml/__init__.py' });
+  const g = new PackageGraph(async (p) => files[p], 200, pyAdapter('lib', analyzePyFile));
+  const r = await resolveAcrossFiles(g, found!.entry, 'lib/yaml/constructor.py', new Set(['set_python_instance_state', 'FullConstructor']));
+  assert.ok(r);
+  assert.deepEqual([...r!.symbols.keys()].sort(), ['FullLoader', 'full_load', 'load']);
+});
 
 test('esm barrel: a changed internal function resolves to the entry export that reaches it', async () => {
   const g = repo({

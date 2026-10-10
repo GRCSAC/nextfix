@@ -59,6 +59,46 @@
       "references": ["https://github.com/advisories/GHSA-qw6h-vgh9-j6wx"]
     },
     {
+      "ids": ["CVE-2017-18342"],
+      "ecosystem": "PyPI",
+      "package": "pyyaml",
+      "symbols": ["load", "load_all"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "note": "yaml.load() without a Loader (before 5.1) constructs arbitrary Python objects.",
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2017-18342", "https://github.com/yaml/pyyaml/wiki/PyYAML-yaml.load(input)-Deprecation"]
+    },
+    {
+      "ids": ["CVE-2020-1747"],
+      "ecosystem": "PyPI",
+      "package": "pyyaml",
+      "symbols": ["load", "load_all", "full_load", "full_load_all", "FullLoader"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "note": "FullLoader (the default for yaml.load) could run arbitrary code before 5.3.1.",
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2020-1747"]
+    },
+    {
+      "ids": ["CVE-2020-14343"],
+      "ecosystem": "PyPI",
+      "package": "pyyaml",
+      "symbols": ["load", "load_all", "full_load", "full_load_all", "FullLoader"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "note": "Incomplete fix for CVE-2020-1747 in FullLoader; fixed in 5.4.",
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2020-14343"]
+    },
+    {
+      "ids": ["CVE-2023-32681"],
+      "ecosystem": "PyPI",
+      "package": "requests",
+      "symbols": ["get", "post", "put", "patch", "delete", "head", "options", "request", "Session"],
+      "source": "curated",
+      "confidence": "confirmed",
+      "note": "Proxy-Authorization header leaked on redirect through an HTTPS proxy; every request method is affected.",
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2023-32681"]
+    },
+    {
       "ids": ["GHSA-xvch-5gv4-984h", "CVE-2021-44906"],
       "ecosystem": "npm",
       "package": "minimist",

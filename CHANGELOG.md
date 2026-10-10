@@ -5,6 +5,47 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-09
+
+### Added
+- **Python.** Inventory from pinned `requirements*.txt`, `Pipfile.lock`, `poetry.lock` and
+  `uv.lock` (PEP 503 names, PEP 440 version ordering for fixes); OSV lookups in the PyPI
+  ecosystem; a tree-sitter based module analyzer (WebAssembly grammar, no native build);
+  and entry points for **Flask** (`@app.route` / `@bp.get`, blueprints with `url_prefix`,
+  `register_blueprint` from `create_app()` factories, `@login_required`-style decorators,
+  rejecting `before_request` hooks), **FastAPI** (`APIRouter(prefix, dependencies)`, nested
+  `include_router`, `Depends(...)` and `CurrentUser`-style annotated parameters as guards,
+  handler parameters as request data) and **Django** (`urlpatterns` with `path`/`re_path`/
+  `include`, function views, class-based views per HTTP verb, `LoginRequiredMixin`,
+  `@login_required`, `permission_classes`). `request`, `ctx` and every handler parameter are
+  request-data roots; the call graph resolves `from pkg import x`, relative imports, barrel
+  `__init__` re-exports and `self.method()`.
+- **Python symbol derivation.** Fix commits touching `.py` files are analysed with the same
+  pipeline: changed functions and methods, the class they belong to, module-level variables,
+  and cross-file resolution through the package's `__init__.py` (star imports, `__all__`,
+  Python 2 implicit relative imports). PyYAML's constructor fix derives to `load`,
+  `full_load`, `FullLoader`, …; requests' proxy fix to `Session`; PyJWT's to `PyJWS` and its
+  helpers.
+- Curated PyPI seed for PyYAML (CVE-2017-18342, CVE-2020-1747, CVE-2020-14343) and requests
+  (CVE-2023-32681).
+- Mixed projects (a `package-lock.json` and Python requirements in one folder) are scanned
+  as one graph; findings carry their ecosystem and `pip install` fix commands.
+- Derivation failures are keyed by a pipeline version, so they are retried after upgrades.
+
+### Fixed
+- Broken symlinks and dot-directories no longer abort file discovery.
+- Request-data sources name the request expression behind a local variable
+  (`request.POST['body']`, not `body`), and a handler's own request-carrying parameter counts
+  as a direct source.
+- Django class-based views pair each HTTP verb with its own method.
+
+Validated on Flask microblog (35 routes, 25 behind `login_required`; the Act findings are
+PyJWT decoding the password-reset token from the URL), OWASP PyGoat (Django,
+137 routes, 141 advisories of which 94 got derived function data; the four Act findings are
+the insecure-deserialisation lab calling `yaml.load` on an uploaded file and the
+misconfiguration lab decoding an attacker-controlled cookie with PyJWT) and the FastAPI
+full-stack template (23 routes, 17 behind dependencies).
+
 ## [0.5.2] — 2026-10-09
 
 ### Added

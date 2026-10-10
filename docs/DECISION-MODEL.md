@@ -122,6 +122,16 @@ The score never changes a decision; it orders findings within a decision.
   and an anti-guard list (`unprotected`, `public…`) are excluded, or by **body** for inline
   functions that reject requests (401/403, `unauthorized`, `ctx.throw`). Add project names
   via `nextfix.config.json`. Not covered: NestJS decorators, Hapi, serverless handlers.
+- Python entry points: Flask (`@app.route`/`@bp.<verb>`, blueprint `url_prefix`,
+  `register_blueprint` incl. inside `create_app()`, decorator guards, rejecting
+  `before_request` hooks), FastAPI (`APIRouter(prefix, dependencies)`, nested
+  `include_router`, `Depends(...)` and `CurrentUser`-style annotations as guards), Django
+  (`urlpatterns`, `include()`, function and class-based views per verb, `LoginRequiredMixin`,
+  `@login_required`, `permission_classes`). Every handler parameter is request data.
+- Framework-internal code paths are not modelled: an advisory in Django's request parsing or
+  a middleware runs on every request without your code calling it, so it shows as
+  "imported, not called" unless your code calls the affected function. Treat those as a
+  reason to upgrade on the normal cycle, which is what Track says.
 - Handlers: inline functions, local functions, `controller.method`, `instance.method` of an
   imported class, factory calls (`login()`) and one level of wrapper (`asyncHandler(fn())`).
   Anything else is kept as an entry point with `unresolvedHandlers`, so the route still counts

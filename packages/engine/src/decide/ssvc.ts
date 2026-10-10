@@ -89,7 +89,7 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
 
   let fix: string | undefined;
   if (a.fixedVersion) {
-    const major = semver.major(a.fixedVersion) !== semver.major(c.version);
+    const major = majorOf(a.fixedVersion) !== majorOf(c.version);
     fix = `Upgrade ${c.name} ${c.version} → ${a.fixedVersion}${major ? ' (major version change — check for breaking changes)' : ''}`;
     why.push(`${fix}.`);
   } else {
@@ -116,6 +116,11 @@ function score(f: Input, exploitation: Exploitation, unauth: boolean, userInput:
   if (exploitation === 'active') s += 15;
   if (userInput) s += 5;
   return Math.max(0, Math.min(100, Math.round(s)));
+}
+
+function majorOf(v: string): string {
+  const s = semver.valid(v) ? String(semver.major(v)) : v.replace(/^v/, '').split(/[.+!-]/)[0];
+  return s ?? v;
 }
 
 function list(items: string[]): string {

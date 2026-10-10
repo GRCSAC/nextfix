@@ -60,7 +60,11 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
 }
 
 const SKIP_PATH = /(^|\/)(test|tests|__tests__|spec|specs|docs?|examples?|benchmark|bench|fixtures|dist|build|coverage|\.github)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$|\.d\.ts$|\.(md|json|yml|yaml|lock|txt|snap|html|css)$/i;
-const SOURCE_EXT = /\.(c|m)?(j|t)sx?$/i;
+const SOURCE_EXT = /\.((c|m)?(j|t)sx?|py)$/i;
+
+export function isPython(path: string): boolean {
+  return /\.py$/i.test(path);
+}
 
 /** Keeps only files that could change the package's runtime behaviour. */
 export function sourceFiles(files: DiffFile[]): DiffFile[] {

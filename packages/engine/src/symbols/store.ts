@@ -38,16 +38,20 @@ export class DerivedStore {
     this.cache.raw().prepare('DELETE FROM derived_symbols WHERE advisory = ? AND package = ?').run(advisoryId, pkg);
   }
 
-  /** Remembers that derivation found nothing, so scans do not retry every time. */
+  /** Remembers that derivation found nothing, so scans do not retry every time. The key carries the
+   * pipeline version: when derivation improves, old failures are retried automatically. */
   markFailed(advisoryId: string, pkg: string, reason: string, ttlMs: number): void {
-    this.cache.set(`derive:fail:${advisoryId}|${pkg}`, reason, ttlMs);
+    this.cache.set(`derive:fail:${DERIVE_VERSION}:${advisoryId}|${pkg}`, reason, ttlMs);
   }
 
   failedReason(advisoryId: string, pkg: string): string | undefined {
-    return this.cache.get<string>(`derive:fail:${advisoryId}|${pkg}`);
+    return this.cache.get<string>(`derive:fail:${DERIVE_VERSION}:${advisoryId}|${pkg}`);
   }
 
   clearFailed(advisoryId: string, pkg: string): void {
-    this.cache.delete(`derive:fail:${advisoryId}|${pkg}`);
+    this.cache.delete(`derive:fail:${DERIVE_VERSION}:${advisoryId}|${pkg}`);
   }
 }
+
+/** Bump when derivation gets smarter, so cached "nothing derived" results are retried. */
+export const DERIVE_VERSION = 4;

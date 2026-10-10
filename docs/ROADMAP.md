@@ -55,7 +55,18 @@ followed. Validated live on moment, marked, qs, lodash, express, send, minimist.
 demo and a Koa REST template. Order agreed for what follows: Python, then the team edition,
 then Go.
 
-## 0.6 — Team edition (separate commercial repo)
+## 0.6 — Python (done 2026-10-09)
+
+Flask, FastAPI and Django entry points on a tree-sitter analyzer, PyPI inventory and
+advisories, Python symbol derivation through package `__init__` files. Validated on Flask
+microblog, OWASP PyGoat and the FastAPI full-stack template. **This is the release the
+repository goes public with**, once the trademark is filed.
+
+Known open: Django/DRF `permission_classes` as class attributes, Flask-RESTful / Flask-RESTX
+resource classes, Starlette-only apps, Tornado; method calls on framework objects
+(`request.get_host()`) cannot be matched to derived symbols.
+
+## 0.7 — Team features (open, in this repo)
 
 - OIDC single sign-on, local accounts fallback.
 - Roles: admin, analyst, viewer (executives are viewers).
@@ -63,7 +74,7 @@ then Go.
 - Offline advisory bundles for air-gapped installs.
 - The open repo keeps WCAG AA on every page and a stable API the team edition builds on.
 
-## 0.7 — Python and Go
+## 0.8 — Go
 
 - Python: tree-sitter (wasm) parser, Flask / FastAPI / Django entry points, same tiers.
 - Go: wrap `govulncheck` (symbol-level, from the Go vuln DB) and map into tiers.

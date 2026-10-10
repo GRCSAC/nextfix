@@ -1,5 +1,10 @@
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { readNpmLock } from './inventory/npm-lock.ts';
+import { hasPythonProject, readPythonDeps } from './inventory/python.ts';
+import { analyzePythonProject } from './graph/py/project.ts';
+import { mergeGraphs } from './graph/merge.ts';
+import type { Component } from './types.ts';
 import { Cache } from './vulns/cache.ts';
 import { fetchAdvisories } from './vulns/osv.ts';
 import { fetchEpss } from './vulns/epss.ts';
@@ -22,6 +27,8 @@ export interface ScanOptions {
   derive?: boolean;
   /** Stop deriving after this many milliseconds; the rest is picked up on the next scan (default 90 s). */
   deriveBudgetMs?: number;
+  /** Advisories derived in parallel (default 4). */
+  deriveConcurrency?: number;
   githubToken?: string;
   log?: (msg: string) => void;
 }
@@ -34,12 +41,35 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
   const cache = new Cache(opts.cachePath);
   try {
     const config = loadConfig(rootDir);
-    log('Inventory: reading package-lock.json');
-    const inv = readNpmLock(rootDir);
-    log(`Inventory: ${inv.components.length} components`);
+    const hasNode = existsSync(join(rootDir, 'package-lock.json'));
+    const hasPy = hasPythonProject(rootDir);
+    if (!hasNode && !hasPy) throw new Error(`No package-lock.json and no Python requirements/lockfile in ${rootDir}.`);
+
+    const components: Component[] = [];
+    let projectName: string | undefined;
+    let projectVersion: string | undefined;
+    if (hasNode) {
+      log('Inventory: reading package-lock.json');
+      const inv = readNpmLock(rootDir);
+      components.push(...inv.components);
+      projectName = inv.projectName;
+      projectVersion = inv.projectVersion;
+      log(`Inventory: ${inv.components.length} npm components`);
+    }
+    if (hasPy) {
+      const pyInv = readPythonDeps(rootDir);
+      components.push(...pyInv.components);
+      log(`Inventory: ${pyInv.components.length} PyPI components from ${pyInv.sources.join(', ')}`);
+    }
+    const inv = { components, projectName: projectName ?? basename(rootDir), projectVersion };
 
     log('Code: building call graph and entry points');
-    const graph = analyzeProject(rootDir, config);
+    let graph = analyzeProject(rootDir, config);
+    if (hasPy) {
+      const installed = new Set(components.filter((c) => c.ecosystem === 'PyPI').map((c) => c.name));
+      const pyGraph = await analyzePythonProject(rootDir, { installed, authGuards: config.authGuards, ignore: config.ignore, internalRoutes: config.internalRoutes });
+      graph = hasNode ? mergeGraphs(graph, pyGraph) : mergeGraphs(pyGraph, graph);
+    }
     log(`Code: ${graph.modules.size} modules, ${graph.functions.size} functions, ${graph.entryPoints.length} entry points`);
 
     const exposure = analyzeExposure(rootDir, graph.listenLocalOnly);
@@ -58,33 +88,40 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       let derived = 0;
       let skipped = 0;
       let deferred = 0;
+      let stopped = false;
       const token = opts.githubToken ?? process.env.GITHUB_TOKEN;
       const budget = opts.deriveBudgetMs ?? 90_000;
       const started = Date.now();
-      outer: for (const c of inv.components) {
-        for (const a of advisories.get(c.purl) ?? []) {
-          if (symbols.lookup([a.id, ...a.aliases], c.name)) continue;
+      const queue: { c: Component; a: (typeof findings)[number]['advisory'] }[] = [];
+      for (const c of inv.components) for (const a of advisories.get(c.purl) ?? []) if (!symbols.lookup([a.id, ...a.aliases], c.name)) queue.push({ c, a });
+      // Several advisories at once: derivation is bound by GitHub fetch latency, not CPU.
+      const worker = async () => {
+        while (queue.length && !stopped) {
+          const { c, a } = queue.shift()!;
           if (Date.now() - started > budget) {
             deferred++;
             continue;
           }
-          const out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences });
+          const out = await deriveSymbols(a, c.name, { cache, offline: opts.offline, token, store, log, typedReferences: a.typedReferences, ecosystem: c.ecosystem });
           if (out.entry) {
             if (!out.cached) derived++;
             symbols.add(out.entry);
           } else {
             skipped++;
+            if (process.env.NEXTFIX_DEBUG) log(`Symbols: ${a.id} ${c.name}: ${out.reason}${out.cached ? ' (cached)' : ''}`);
             if (out.reason?.includes('rate limit')) {
               log(`Symbols: ${out.reason}; stopping derivation for this scan`);
-              break outer;
+              stopped = true;
             }
           }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: opts.deriveConcurrency ?? 4 }, worker));
       log(`Symbols: ${derived} newly derived from fix commits, ${skipped} advisories without usable fix data${deferred ? `, ${deferred} deferred to the next scan (time budget)` : ''}`);
     }
 
     const findings: Finding[] = [];
+    void (findings as unknown);
     for (const c of inv.components) {
       for (const a of advisories.get(c.purl) ?? []) {
         const sym = symbols.lookup([a.id, ...a.aliases], c.name);

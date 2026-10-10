@@ -28,9 +28,14 @@ export function discoverSourceFiles(rootDir: string): string[] {
   const walk = (dir: string) => {
     for (const name of readdirSync(dir)) {
       const full = join(dir, name);
-      const st = statSync(full);
+      let st;
+      try {
+        st = statSync(full);
+      } catch {
+        continue; // broken symlink
+      }
       if (st.isDirectory()) {
-        if (!SKIP_DIRS.has(name)) walk(full);
+        if (!SKIP_DIRS.has(name) && !name.startsWith('.')) walk(full);
       } else if (st.isFile()) {
         const dot = name.lastIndexOf('.');
         const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';

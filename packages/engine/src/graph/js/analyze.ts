@@ -41,6 +41,8 @@ export interface CallArg {
   text: string;
   /** Names the argument derives from: the function's parameters, `req`/`request`, or free (captured) identifiers. */
   roots: string[];
+  /** The request expression a local variable in the argument was assigned from (`req.body.t` for `const tpl = req.body.t`). */
+  origin?: string;
 }
 
 export interface CallSite {
@@ -63,6 +65,8 @@ export interface FunctionInfo {
   calls: CallSite[];
   /** Enclosing function (callbacks and returned closures are reachable from it). */
   parentId?: string;
+  /** Parameters that carry request data by framework convention (Flask/Django/FastAPI handler arguments). */
+  inputParams?: string[];
 }
 
 export interface RouteReg {
@@ -354,7 +358,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
   // ---- data flow inside a function: which names does each expression derive from? ----
   // Roots are the function's parameters, `req`/`request`, and free (captured) identifiers.
   // Local variables are resolved to the roots of what they were assigned from.
-  const flowByFn = new Map<ts.Node | undefined, { locals: Map<string, Set<string>>; params: Set<string> }>();
+  const flowByFn = new Map<ts.Node | undefined, { locals: Map<string, Set<string>>; params: Set<string>; origins: Map<string, string> }>();
 
   function baseIdentifiers(n: ts.Node, out: Set<string>) {
     if (ts.isIdentifier(n)) {
@@ -382,13 +386,25 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     const params = new Set<string>();
     if (fnNode && isFunctionLike(fnNode)) for (const p of fnNode.parameters) if (ts.isIdentifier(p.name)) params.add(p.name.text);
     const raw = new Map<string, Set<string>>(); // local -> direct base identifiers of its initializer
+    const origins = new Map<string, string>();
     const bind = (name: ts.BindingName, init: ts.Node | undefined) => {
       if (!init) return;
       const ids = new Set<string>();
       baseIdentifiers(init, ids);
-      if (ts.isIdentifier(name)) raw.set(name.text, new Set([...(raw.get(name.text) ?? []), ...ids]));
-      else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
-        for (const el of name.elements) if (ts.isBindingElement(el) && ts.isIdentifier(el.name)) raw.set(el.name.text, new Set([...(raw.get(el.name.text) ?? []), ...ids]));
+      const fromReq = [...ids].some((i) => REQ_NAMES.has(i));
+      const initText = init.getText(sf).replace(/\s+/g, ' ').slice(0, 60);
+      const note = (n: string) => {
+        if (fromReq && !origins.has(n)) origins.set(n, initText);
+        else if (!origins.has(n)) for (const i of ids) if (origins.has(i)) origins.set(n, origins.get(i)!);
+      };
+      if (ts.isIdentifier(name)) {
+        raw.set(name.text, new Set([...(raw.get(name.text) ?? []), ...ids]));
+        note(name.text);
+      } else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        for (const el of name.elements) if (ts.isBindingElement(el) && ts.isIdentifier(el.name)) {
+          raw.set(el.name.text, new Set([...(raw.get(el.name.text) ?? []), ...ids]));
+          note(el.name.text);
+        }
       }
     };
     const walk = (x: ts.Node) => {
@@ -415,7 +431,7 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
       return out;
     };
     for (const name of raw.keys()) resolve(name, 0, new Set());
-    f = { locals, params };
+    f = { locals, params, origins };
     flowByFn.set(fnNode, f);
     return f;
   }
@@ -432,7 +448,13 @@ export function analyzeModule(file: string, rootDir: string, options: AnalyzeOpt
     return out;
   }
   function callArgs(call: ts.CallExpression, fnNode: ts.Node | undefined): CallArg[] {
-    return call.arguments.map((a) => ({ text: a.getText(sf).replace(/\s+/g, ' ').slice(0, 60), roots: [...rootsOf(a, fnNode)] }));
+    const f = flow(fnNode);
+    return call.arguments.map((a) => {
+      const ids = new Set<string>();
+      baseIdentifiers(a, ids);
+      const origin = [...ids].map((i) => f.origins.get(i)).find((o) => o);
+      return { text: a.getText(sf).replace(/\s+/g, ' ').slice(0, 60), roots: [...rootsOf(a, fnNode)], origin };
+    });
   }
   function argsUseInput(args: CallArg[]): boolean {
     return args.some((a) => a.roots.some((r) => REQ_NAMES.has(r)));
