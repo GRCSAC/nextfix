@@ -60,7 +60,7 @@ then Go.
 Flask, FastAPI and Django entry points on a tree-sitter analyzer, PyPI inventory and
 advisories, Python symbol derivation through package `__init__` files. Validated on Flask
 microblog, OWASP PyGoat and the FastAPI full-stack template. **This is the release the
-repository goes public with**, once the trademark is filed.
+repository goes public with** (later moved to after the 1.0 feature list).
 
 Known open: Django/DRF `permission_classes` as class attributes, Flask-RESTful / Flask-RESTX
 resource classes, Starlette-only apps, Tornado; method calls on framework objects
@@ -82,7 +82,8 @@ The repository opens once the five remaining feature-table items are done, in th
 4. Team features: local accounts, roles, audit log, API tokens, OIDC (0.10)
 5. Packaging: single executable per platform, Docker image, Windows installer (1.0)
 
-The trademark filing package is in `docs/TRADEMARK.md`; filing is the applicant's own step.
+Decided 2026-10-10: the name is used as an unregistered mark (NextFix™); a use-based filing
+may follow after launch. The prepared application stays in `docs/TRADEMARK.md`.
 
 ## 0.8 — Container images (done 2026-10-09)
 
@@ -119,8 +120,8 @@ release (0.6)**, once two ecosystems make it clearly more than a demo. The publi
 launch, not a flip:
 - Launch prep done ahead of time: `SECURITY.md` (private disclosure path), `CONTRIBUTING.md`
   with a Developer Certificate of Origin, issue and pull-request templates, a code of conduct.
-- The NEXTFIX trademark filed (classes 9 and 42) so nobody else can publish a confusing
-  "NextFix".
+- The name used as NextFix™ with dated first-use evidence kept from launch day; a use-based
+  registration can follow when it is worth the fee.
 - History reviewed once more: no attribution trailers, no internal paths, no secrets.
 - A launch post (LinkedIn, the Exposure Management community) with the validation table.
 
@@ -134,5 +135,5 @@ simply becomes features in the open repo.
 - Installer for Windows like NetVane; `winget` + Chocolatey.
 - Website `nextfix.grcsac.com` (brand kit in `docs/BRAND.md`); open edition free, team
   edition priced per application count.
-- Trademark filing for NEXTFIX in classes 9 and 42 (see `docs/NAME-CHECK.md`), then flip
-  the repo public.
+- Launch-day evidence of first use of the NextFix™ mark saved (see `docs/TRADEMARK.md`),
+  then flip the repo public.

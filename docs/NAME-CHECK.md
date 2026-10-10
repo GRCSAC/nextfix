@@ -22,5 +22,7 @@ non-US website scanner with no sign of a trademark.
 **Decision (Paul, 2026-10-09):** NextFix is marketed at **nextfix.grcsac.com** under the
 GRCSAC umbrella, like every other GRCSAC product. No standalone domain will be registered.
 
-**Remaining action (Paul):** file an intent-to-use USPTO application for NEXTFIX in classes
+**Decision 2026-10-10:** the mark is used unregistered (NextFix™) with dated first-use
+evidence kept; registration is deferred, use-based, to after launch (see `docs/TRADEMARK.md`).
+The earlier plan was to file an intent-to-use USPTO application for NEXTFIX in classes
 9 and 42 before public launch.

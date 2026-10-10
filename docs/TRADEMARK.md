@@ -1,4 +1,31 @@
-# NEXTFIX trademark application (prepared package)
+# NEXTFIX trademark: current plan and a prepared application
+
+## Decision (2026-10-10): use the mark unregistered for now
+
+NextFix is used as an unregistered trademark of GRCSAC LLC. In the United States rights in a
+mark come from use in commerce, not from registration; registration adds nationwide
+presumption of ownership and the ® symbol, which can be added later. Until then:
+
+- Write **NextFix™** at the first mention on the website, in the README and in release notes
+  (never ®, which is reserved for registered marks).
+- Keep dated evidence of first public use and of continuous use: the first public GitHub
+  release page, the website as it looked on launch day (a PDF print and the Wayback Machine
+  capture), the launch post. Store copies under a `trademark/` folder outside the repository.
+- Keep the name consistent everywhere: "NextFix" as the product, "NextFix by GRCSAC" where
+  the owner matters, the same wordmark and logo.
+- Watch for confusing use: a saved search for "nextfix" on the USPTO search system, npm,
+  PyPI and GitHub every few months. If anyone files for a confusingly similar mark, that is
+  the moment to file (and the prepared package below is the application).
+
+### Filing later
+
+When registration becomes worth the fee, file **use-based** (Section 1(a)) rather than
+intent-to-use: the application fee is the same ($350 per class, $700 for both) but the $300
+Statement of Use step never arises, and the specimens are the live website and release page.
+Class 9 alone ($350) covers the software that ships; class 42 is optional insurance for a
+hosted "NextFix" service.
+
+## The prepared application
 
 Everything below is ready to paste into the USPTO filing form. The filing itself must be done
 by the applicant: USPTO.gov requires an account verified against a government ID, the
@@ -36,8 +63,10 @@ lock-up as well. A separate design-mark filing for the gradient N is optional an
 
 ## Filing basis
 
-**Section 1(b), intent to use** for both classes. The mark is not in commerce yet. After
-launch, file an Allegation of Use (Statement of Use) with a specimen, see below.
+**Section 1(a), use in commerce**, once NextFix is publicly available: give the date of first
+use (the first public release) and attach the specimens below with the application. Before
+launch the basis would be Section 1(b), intent to use, with a Statement of Use ($150 per
+class) after launch.
 
 ## Goods and services
 
@@ -84,7 +113,7 @@ Fees are not refundable if the application is refused.
   (extendable up to 36) to file the Statement of Use with a specimen.
 - Registration: a few months after the Statement of Use is accepted.
 
-## Specimen (needed at the Statement of Use stage, not at filing)
+## Specimen (attached to a use-based application; at the Statement of Use stage for intent-to-use)
 
 - Class 9: a screenshot of the download or installation page showing the mark next to the
   software and a way to obtain it (the GitHub releases page or nextfix.grcsac.com download
@@ -103,5 +132,6 @@ signed electronically by Paul Zarou as a member/officer of GRCSAC LLC.
 ## After filing
 
 1. Add the serial number to this file and to `docs/NAME-CHECK.md`.
-2. Use ™ (not ®) next to the name until registration issues.
-3. Calendar the Statement of Use deadline when the Notice of Allowance arrives.
+2. Keep ™ (not ®) next to the name until registration issues, then switch to ®.
+3. For an intent-to-use filing only: calendar the Statement of Use deadline when the Notice
+   of Allowance arrives.

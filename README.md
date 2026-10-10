@@ -1,4 +1,4 @@
-# NextFix
+# NextFix™
 
 **Scanners find. NextFix decides.**
 
@@ -302,7 +302,8 @@ NextFix is open-core. Everything in this repository, the engine, the CLI, the se
 both dashboards, is licensed under the [Apache License 2.0](LICENSE). Team features
 (single sign-on, roles, audit log, API tokens) and the curated vulnerable-symbol feed with
 support are offered commercially by GRCSAC LLC and live outside this repository.
-"NextFix" and the logo are trademarks of GRCSAC LLC (see [NOTICE](NOTICE)).
+"NextFix" and the logo are trademarks of GRCSAC LLC, used as unregistered marks (see
+[NOTICE](NOTICE)).
 
 Brand assets and the website hand-off are in [docs/BRAND.md](docs/BRAND.md).
 
