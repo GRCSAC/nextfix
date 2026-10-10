@@ -1,6 +1,6 @@
 {
   "name": "@nextfix/engine",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "NextFix analysis engine: inventory, advisories, call-graph reachability, exposure, decisions.",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "semver": "^7.7.2",
+    "tree-sitter-go": "^0.25.0",
     "tree-sitter-python": "^0.25.0",
     "typescript": "^5.9.2",
     "web-tree-sitter": "^0.27.1"

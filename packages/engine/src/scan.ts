@@ -1,11 +1,16 @@
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { readNpmLock } from './inventory/npm-lock.ts';
+import { hasNodeProject, readNodeInventory } from './inventory/node.ts';
 import { hasPythonProject, readPythonDeps } from './inventory/python.ts';
+import { hasGoProject, purlForGo, readGoDeps } from './inventory/go.ts';
 import { componentKey, configImageProblem, configSbomProblem, detectSbomFiles, readContainerInventory } from './inventory/container.ts';
 import { analyzePythonProject } from './graph/py/project.ts';
+import { analyzeGoProject } from './graph/go/project.ts';
+import { pathBase } from './graph/go/analyze.ts';
 import { mergeGraphs } from './graph/merge.ts';
-import type { Component } from './types.ts';
+import type { ProjectGraph } from './graph/js/project.ts';
+import { frameSymbol, goIdFor, projectCallSite, runGovulncheck, type GovulncheckResult } from './govuln/govulncheck.ts';
+import type { CallSiteRef, Component, SymbolEntry } from './types.ts';
 import { Cache } from './vulns/cache.ts';
 import { fetchAdvisories } from './vulns/osv.ts';
 import { fetchEpss } from './vulns/epss.ts';
@@ -61,6 +66,100 @@ function exploitationFor(a: Advisory, epss: Map<string, { score: number; percent
 
 const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
 
+// ---------------------------------------------------------------------------------------------
+// Go reachability
+
+/** Files of the graph that import any package of a Go module (`net/http` and `os` belong to `stdlib`). */
+function goImportedIn(graph: ProjectGraph, module: string): string[] {
+  const files = new Set<string>();
+  for (const [pkg, where] of graph.packagesImported) {
+    const inModule = module === 'stdlib' ? !pkg.split('/')[0]!.includes('.') : pkg === module || pkg.startsWith(module + '/');
+    if (inModule) for (const f of where) files.add(f);
+  }
+  return [...files].sort();
+}
+
+/**
+ * Vulnerable symbols of one advisory for one module, from the OSV data govulncheck carries. Go
+ * call sites are recorded per module with the bare name as the symbol and the package-qualified
+ * spellings (`http.Get`, `http.Header.Get`) as alternatives, so the entry uses the qualified
+ * form: `Get` from net/http must not answer for `Values.Get` from net/url in the same module.
+ */
+function goSymbolEntry(gv: GovulncheckResult, goId: string, ids: string[], module: string): SymbolEntry | undefined {
+  const pkgs = (gv.symbols.get(goId)?.packages ?? []).filter((p) => p.module === module && p.symbols.length);
+  if (!pkgs.length) return undefined;
+  const symbols = [...new Set(pkgs.flatMap((p) => p.symbols.map((s) => `${pathBase(p.path)}.${s}`)))];
+  return { ids, ecosystem: 'Go', package: module, symbols, source: 'advisory', confidence: 'confirmed', note: 'Vulnerable symbols from the Go vulnerability database (vuln.go.dev).' };
+}
+
+/** Reachability through the project's Go call graph. */
+function goGraphReach(graph: ProjectGraph, c: Component, entry: SymbolEntry | undefined, importedIn: string[]): ReachResult {
+  if (!entry) return { tier: importedIn.length ? 'imported-unknown-symbol' : 'unused', confidence: 'package-level', importedIn, callSites: [], paths: [] };
+  return assessReach(graph, c, entry);
+}
+
+/**
+ * Reachability from govulncheck's verdict for the advisory on this module: a symbol called from
+ * the program's entry points counts as called-unreached (no HTTP route was traced to it), an
+ * imported vulnerable package as imported-not-called, a required module as unused.
+ */
+function goVerdictReach(gv: GovulncheckResult, goId: string | undefined, c: Component, entry: SymbolEntry | undefined, importedIn: string[]): ReachResult {
+  const base: ReachResult = { tier: 'unused', confidence: 'package-level', importedIn, callSites: [], paths: [] };
+  // The Go vulnerability database has no entry for this advisory, so govulncheck had nothing to
+  // say: a module go.mod requires is in the build and cannot be ruled out; one only go.sum lists is not built.
+  if (!goId) {
+    if (importedIn.length) return { ...base, tier: 'imported-unknown-symbol' };
+    return c.path === 'go.sum' ? base : { ...base, tier: 'imported-unknown-symbol', importedIn: ['go.mod'] };
+  }
+  const verdict = gv.verdicts.get(goId);
+  const level = verdict?.byModule[c.name];
+  // govulncheck knows the advisory and reported nothing for this module: no package of the program loads it.
+  if (!verdict || !level) return importedIn.length ? { ...base, tier: 'imported-unknown-symbol' } : base;
+  // Where the import shows: the graph's files when it has them, else the vulnerable packages govulncheck saw imported.
+  const where = importedIn.length ? importedIn : verdict.packages[c.name] ?? [];
+  if (level === 'required') return { ...base, confidence: 'confirmed' };
+  if (level === 'imported') return { ...base, tier: entry ? 'imported-not-called' : 'imported-unknown-symbol', confidence: entry ? 'confirmed' : 'package-level', importedIn: where };
+  const callSites: CallSiteRef[] = [];
+  const seen = new Set<string>();
+  for (const trace of verdict.trace) {
+    const first = trace[0];
+    if (!first || first.module !== c.name) continue;
+    const symbol = frameSymbol(first);
+    const site = projectCallSite(trace);
+    const ref: CallSiteRef = site ? { file: site.file, line: site.line, col: site.col, text: symbol, symbol, userInput: false } : { file: 'go.mod', line: 0, col: 0, text: symbol, symbol, userInput: false };
+    const key = `${ref.file}:${ref.line}:${symbol}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    callSites.push(ref);
+  }
+  return { ...base, tier: 'called-unreached', confidence: 'confirmed', importedIn: where, callSites };
+}
+
+/**
+ * Decides reach for one advisory on one Go module. The project call graph answers when it found
+ * entry points; otherwise govulncheck's verdict does; with neither, NextFix cannot rule the call
+ * out and says so (imported-unknown-symbol) rather than filing the module as unused.
+ */
+function goReach(graph: ProjectGraph, graphUsable: boolean, gv: GovulncheckResult | undefined, c: Component, ids: string[], curated: SymbolEntry | undefined): { reach: ReachResult; symbols?: SymbolEntry } {
+  const goId = gv ? goIdFor(gv, ids) : undefined;
+  const symbolsEntry = curated ?? (gv && goId ? goSymbolEntry(gv, goId, ids, c.name) : undefined);
+  const importedIn = goImportedIn(graph, c.name);
+  const verdictLevel = goId ? gv?.verdicts.get(goId)?.byModule[c.name] : undefined;
+  if (c.dev) return { reach: { tier: 'dev-only', confidence: 'package-level', importedIn, callSites: [], paths: [] }, symbols: symbolsEntry };
+  if (graphUsable) {
+    const reach = goGraphReach(graph, c, symbolsEntry, importedIn);
+    // The graph sees the project's own calls only. When govulncheck, which follows calls inside the
+    // dependencies too, saw the symbol called (or a package imported the graph did not parse), its
+    // whole-program view wins over a weaker graph verdict.
+    const graphBeaten = (verdictLevel === 'called' && reach.tier !== 'reachable' && reach.tier !== 'called-unreached') || (verdictLevel === 'imported' && reach.tier === 'unused');
+    if (!graphBeaten || !gv || gv.error) return { reach, symbols: symbolsEntry };
+  }
+  if (gv && !gv.error) return { reach: goVerdictReach(gv, goId, c, symbolsEntry, importedIn), symbols: symbolsEntry };
+  // No govulncheck and no entry points: a module go.mod requires cannot be ruled out; one only go.sum lists is not built.
+  const unknown = importedIn.length > 0 || c.path !== 'go.sum';
+  return { reach: { tier: unknown ? 'imported-unknown-symbol' : 'unused', confidence: 'package-level', importedIn: importedIn.length ? importedIn : unknown ? ['go.mod'] : [], callSites: [], paths: [] }, symbols: symbolsEntry };
+}
+
 export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanReport> {
   const rootDir = resolve(dir);
   const log = opts.log ?? (() => {});
@@ -71,8 +170,9 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
   const cache = new Cache(opts.cachePath);
   try {
     const config = loadConfig(rootDir);
-    const hasNode = existsSync(join(rootDir, 'package-lock.json'));
+    const hasNode = hasNodeProject(rootDir);
     const hasPy = hasPythonProject(rootDir);
+    const hasGo = hasGoProject(rootDir);
     // Values from the project's own config are treated as untrusted: they cannot point syft at the
     // host or read files outside the project. The user's command line can.
     const configImages = asList(config.image).filter((ref) => {
@@ -87,15 +187,15 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     });
     const imageRefs = [...new Set([...configImages, ...(opts.images ?? [])])];
     const sbomFiles = [...new Set([...configSboms, ...(opts.sboms ?? []), ...detectSbomFiles(rootDir)])];
-    if (!hasNode && !hasPy && !imageRefs.length && !sbomFiles.length) throw new Error(`No package-lock.json, Python requirements/lockfile, SBOM or container image for ${rootDir}.`);
+    if (!hasNode && !hasPy && !hasGo && !imageRefs.length && !sbomFiles.length) throw new Error(`No package-lock.json, yarn.lock or pnpm-lock.yaml, Python requirements/lockfile, go.mod, SBOM or container image for ${rootDir}.`);
 
     checkAbort();
     const components: Component[] = [];
     let projectName: string | undefined;
     let projectVersion: string | undefined;
     if (hasNode) {
-      log('Inventory: reading package-lock.json');
-      const inv = readNpmLock(rootDir);
+      const inv = readNodeInventory(rootDir);
+      log(`Inventory: reading ${inv.sources.join(', ')}`);
       components.push(...inv.components);
       projectName = inv.projectName;
       projectVersion = inv.projectVersion;
@@ -105,6 +205,12 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       const pyInv = readPythonDeps(rootDir);
       components.push(...pyInv.components);
       log(`Inventory: ${pyInv.components.length} PyPI components from ${pyInv.sources.join(', ')}`);
+    }
+    if (hasGo) {
+      const goInv = readGoDeps(rootDir);
+      components.push(...goInv.components);
+      projectName ??= goInv.module;
+      log(`Inventory: ${goInv.components.length} Go components from ${goInv.sources.join(', ')}${goInv.localReplacements.length ? ` (${goInv.localReplacements.length} replaced by local directories, not inventoried)` : ''}`);
     }
     let images: ImageInventory[] | undefined;
     if (imageRefs.length || sbomFiles.length) {
@@ -128,6 +234,14 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     const inv = { components, projectName: projectName ?? basename(rootDir), projectVersion };
     const lockfileNames = new Set(components.filter((c) => c.origin !== 'image').map((c) => c.name));
 
+    // govulncheck builds the whole program, so it starts now and is collected before the advisories
+    // are looked up: the toolchain it reports is the standard library version that is actually in play.
+    let govulncheck: Promise<GovulncheckResult> | undefined;
+    if (hasGo && !opts.offline) {
+      log('Go: running govulncheck');
+      govulncheck = runGovulncheck(rootDir);
+    }
+
     checkAbort();
     log('Code: building call graph and entry points');
     let graph = analyzeProject(rootDir, config);
@@ -137,10 +251,38 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       const pyGraph = await analyzePythonProject(rootDir, { installed, authGuards: config.authGuards, ignore: config.ignore, internalRoutes: config.internalRoutes });
       graph = hasNode ? mergeGraphs(graph, pyGraph) : mergeGraphs(pyGraph, graph);
     }
+    // The Go graph decides Go reachability only once it finds entry points; until then govulncheck does.
+    let goGraphUsable = false;
+    if (hasGo) {
+      checkAbort();
+      const installed = new Set(components.filter((c) => c.ecosystem === 'Go').map((c) => c.name));
+      const goGraph = await analyzeGoProject(rootDir, { installed, authGuards: config.authGuards, ignore: config.ignore, internalRoutes: config.internalRoutes });
+      goGraphUsable = goGraph.entryPoints.length > 0;
+      graph = hasNode || hasPy ? mergeGraphs(graph, goGraph) : mergeGraphs(goGraph, graph);
+    }
     log(`Code: ${graph.modules.size} modules, ${graph.functions.size} functions, ${graph.entryPoints.length} entry points`);
 
     checkAbort();
     const exposure = analyzeExposure(rootDir, graph.listenLocalOnly);
+
+    let gv: GovulncheckResult | undefined;
+    let goAnalysis: ScanReport['goAnalysis'];
+    if (hasGo) {
+      gv = govulncheck ? await govulncheck : undefined;
+      checkAbort();
+      if (gv?.error) log(`Go: ${gv.error}`);
+      else if (gv) {
+        const called = [...gv.verdicts.values()].filter((v) => v.level === 'called').length;
+        log(`Go: govulncheck (go ${gv.goVersion ?? '?'}): ${gv.verdicts.size} advisories in the build, ${called} with a vulnerable symbol called`);
+        // The standard library that was analysed is the toolchain's, not the floor go.mod declares.
+        const std = components.find((c) => c.ecosystem === 'Go' && c.name === 'stdlib' && c.origin !== 'image');
+        if (std && gv.goVersion && std.version !== gv.goVersion) {
+          std.version = gv.goVersion;
+          std.purl = purlForGo('stdlib', gv.goVersion);
+        }
+      }
+      goAnalysis = goGraphUsable ? 'call-graph' : gv && !gv.error ? 'govulncheck' : 'none';
+    }
 
     log('Advisories: OSV');
     const advisories = await fetchAdvisories(inv.components, { cache, offline: opts.offline, log });
@@ -206,13 +348,21 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     for (const c of inv.components) {
       for (const a of advisories.get(c.purl) ?? []) {
         checkAbort();
-        const sym = symbols.lookup([a.id, ...a.aliases], c.name);
-        // A package that exists only in the image is analysed through the code graph only when the
-        // application imports it and the lockfile has no copy of its own (the app resolves its own
-        // copy, so an image copy at another version is never the one the code runs). OS packages and
-        // tooling inside the image get no call-path claim.
-        const codeUsed = (c.ecosystem === 'npm' || c.ecosystem === 'PyPI') && graph.packagesImported.has(c.name) && !lockfileNames.has(c.name);
-        const reach = c.origin === 'image' && !codeUsed ? IMAGE_ONLY : assessReach(graph, c, sym);
+        const ids = [a.id, ...a.aliases];
+        let sym = symbols.lookup(ids, c.name);
+        let reach: ReachResult;
+        if (c.ecosystem === 'Go' && c.origin !== 'image') {
+          const go = goReach(graph, goGraphUsable, gv, c, ids, sym);
+          sym = go.symbols;
+          reach = go.reach;
+        } else {
+          // A package that exists only in the image is analysed through the code graph only when the
+          // application imports it and the lockfile has no copy of its own (the app resolves its own
+          // copy, so an image copy at another version is never the one the code runs). OS packages and
+          // tooling inside the image get no call-path claim.
+          const codeUsed = (c.ecosystem === 'npm' || c.ecosystem === 'PyPI') && graph.packagesImported.has(c.name) && !lockfileNames.has(c.name);
+          reach = c.origin === 'image' && !codeUsed ? IMAGE_ONLY : assessReach(graph, c, sym);
+        }
         const partial = {
           id: `${c.purl}|${a.id}`,
           component: c,
@@ -252,6 +402,8 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       entryPoints: graph.entryPoints,
       components: inv.components,
       images,
+      goAnalysis,
+      govulncheckError: gv?.error,
       findings,
     };
   } finally {

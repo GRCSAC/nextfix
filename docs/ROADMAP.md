@@ -78,7 +78,7 @@ The repository opens once the five remaining feature-table items are done, in th
      fix leverage / attack surface / matrix / ageing, re-check exploit data, finding history
      and SLA, phone layout, progress and cancel, contrast and theme fixes, reachability
      performance) — done 2026-10-10
-3. Go via govulncheck (0.9)
+3. Go via govulncheck, SARIF and CI mode (0.9) — done 2026-10-10
 4. Team features: local accounts, roles, audit log, API tokens, OIDC (0.10)
 5. Packaging: single executable per platform, Docker image, Windows installer (1.0)
 
@@ -102,15 +102,27 @@ for every supported distribution.
 
 ## 0.10 — Team features (open, in this repo)
 
-- OIDC single sign-on, local accounts fallback.
-- Roles: admin, analyst, viewer (executives are viewers).
-- Audit log, REST API with tokens, Jira and GitHub Issues export.
+- Local accounts with hashed passwords and cookie sessions; first-run admin setup.
+- OIDC single sign-on: generic authorization-code flow with PKCE and discovery, presets for
+  Microsoft Entra ID, Google and Okta; validated end to end against Entra ID first.
+- Roles: admin, analyst, viewer (executives are viewers). Audit log. Scoped API tokens.
+- Human exceptions (accept risk, false positive, mitigated elsewhere) with reason, approver,
+  expiry and review date, exported into the VEX and shown in the "decide" panel.
+- Portfolio view across applications; owner per application.
+- Scheduled scans, nightly re-decide, and a digest by email, Slack and Teams (Teams first).
 - Offline advisory bundles for air-gapped installs.
-- The open repo keeps WCAG AA on every page and a stable API the team edition builds on.
+- WCAG AA on every page and a stable API.
 
-## 0.9 — Go
+## 0.9 — Go and pipeline mode (done 2026-10-10)
 
-- Wrap `govulncheck` (symbol-level, from the Go vuln DB) and map into tiers.
+go.mod/go.sum inventory with replace and exclude; govulncheck as an optional binary for
+symbol data and verdicts; a tree-sitter Go call graph with entry points and guards for
+net/http, Gin, Echo, Chi, Fiber, gorilla/mux and httprouter, validated on six real Go
+applications (every registered route found). SARIF 2.1.0 output, a GitHub Actions template
+with a pull-request comment, yarn.lock and pnpm-lock.yaml with workspaces.
+
+Known open: `go.work` workspaces, local-directory `replace` targets, gRPC and other
+fasthttp routers; govulncheck needs a C compiler for cgo dependencies.
 
 ## Going public
 
@@ -131,8 +143,13 @@ simply becomes features in the open repo.
 
 ## 1.0 — Ship
 
-- Single executable per platform (Node SEA or Bun compile) and a Docker image.
-- Installer for Windows like NetVane; `winget` + Chocolatey.
+- Single executable per platform (Node single-executable application) and a Docker image
+  on GitHub's container registry, signed with cosign.
+- Installer for Windows like NetVane, Authenticode-signed through Microsoft Trusted Signing
+  (CN=GRCSAC, the same account and fail-closed release script as NetVane); `winget` +
+  Chocolatey.
+- One release workflow: build matrix, tests, NextFix scanning itself with `--fail-on Act`,
+  assets attached, notes from the changelog.
 - Website `nextfix.grcsac.com` (brand kit in `docs/BRAND.md`); open edition free, team
   edition priced per application count.
 - Launch-day evidence of first use of the NextFix™ mark saved (see `docs/TRADEMARK.md`),

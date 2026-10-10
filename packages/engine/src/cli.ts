@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { scan } from './scan.ts';
 import { renderSummary, renderTable, renderWhy } from './report/table.ts';
 import { toOpenVex } from './report/vex.ts';
+import { toSarif } from './report/sarif.ts';
 import { toolVersion } from './version.ts';
 import { Cache } from './vulns/cache.ts';
 import { DerivedStore } from './symbols/store.ts';
@@ -15,7 +16,7 @@ import type { Advisory, Decision } from './types.ts';
 const HELP = `NextFix ${toolVersion()} — tells you what to fix next, and why.
 
 Usage:
-  nextfix scan <dir> [--image <ref>] [--sbom <file>] [--json <file>] [--vex <file>] [--offline] [--no-derive] [--why N] [--quiet]
+  nextfix scan <dir> [--image <ref>] [--sbom <file>] [--json <file>] [--vex <file>] [--sarif <file>] [--fail-on D] [--offline] [--no-derive] [--why N] [--quiet]
   nextfix symbols derive <advisory-id> <package> [--pypi] [--force]   Derive vulnerable functions from the fix commit
   nextfix symbols list                                        Show derived entries on this machine
   nextfix symbols confirm <advisory-id> <package>             Promote a derived entry after review
@@ -28,6 +29,8 @@ Options:
   --sbom <file>   Also read this CycloneDX / SPDX / Grype JSON (repeatable; *.cdx.json and *.spdx.json at the root are read anyway).
   --json <file>   Write the full report as JSON.
   --vex <file>    Write an OpenVEX document (one statement per finding).
+  --sarif <file>  Write SARIF 2.1.0 for GitHub code scanning and other SARIF viewers (one rule per advisory,
+                  one result per finding; Act → error, Attend → warning, Track* → note, Track → none).
   --offline       Use only cached data (~/.nextfix/cache.sqlite).
   --no-derive     Do not fetch fix commits for advisories without function data.
   --why N         Print the full "why" for the top N actionable findings (default 3).
@@ -35,6 +38,7 @@ Options:
   --quiet         No progress output.
 
 Exit codes: 0 ok · 1 error · 2 usage · 3 findings at or above --fail-on.
+In CI: nextfix scan . --json nextfix.json --sarif nextfix.sarif --fail-on Act (see docs/ci/README.md for the GitHub Actions workflow).
 
 Set GITHUB_TOKEN to raise GitHub's unauthenticated rate limit when deriving symbols.
 Set NEXTFIX_SYFT to the syft binary when it is not on the PATH.
@@ -46,6 +50,7 @@ async function main() {
     options: {
       json: { type: 'string' },
       vex: { type: 'string' },
+      sarif: { type: 'string' },
       image: { type: 'string', multiple: true },
       sbom: { type: 'string', multiple: true },
       offline: { type: 'boolean', default: false },
@@ -86,6 +91,7 @@ async function main() {
 
   if (values.json) writeOut(values.json, JSON.stringify(report, null, 2));
   if (values.vex) writeOut(values.vex, JSON.stringify(toOpenVex(report), null, 2));
+  if (values.sarif) writeOut(values.sarif, JSON.stringify(toSarif(report), null, 2));
 
   console.log(renderSummary(report));
   console.log('');
@@ -95,6 +101,7 @@ async function main() {
   if (n > 0) console.log(renderWhy(report, n));
   if (values.json) console.log(`\nJSON report: ${resolve(values.json)}`);
   if (values.vex) console.log(`OpenVEX:     ${resolve(values.vex)}`);
+  if (values.sarif) console.log(`SARIF:       ${resolve(values.sarif)}`);
   if (failOn) {
     const threshold = DECISION_ORDER.indexOf(failOn);
     const hits = report.findings.filter((f) => DECISION_ORDER.indexOf(f.decision) <= threshold);

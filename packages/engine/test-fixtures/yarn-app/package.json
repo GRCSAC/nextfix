@@ -1,0 +1,16 @@
+{
+  "name": "yarn-app",
+  "version": "2.0.0",
+  "private": true,
+  "dependencies": {
+    "@babel/code-frame": "^7.10.0",
+    "lodash": "4.17.15",
+    "string-width-cjs": "npm:string-width@^4.2.0"
+  },
+  "devDependencies": {
+    "minimist": "^1.2.5"
+  },
+  "optionalDependencies": {
+    "fsevents": "^2.3.2"
+  }
+}

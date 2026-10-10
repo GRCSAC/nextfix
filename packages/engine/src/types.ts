@@ -228,5 +228,12 @@ export interface ScanReport {
   components?: Component[];
   /** Container images and SBOMs read for this scan (absent before 0.8). */
   images?: ImageInventory[];
+  /**
+   * How Go reachability was decided (absent for projects without go.mod): the project call graph,
+   * govulncheck's per-advisory verdicts, or neither (offline, or govulncheck missing or failed).
+   */
+  goAnalysis?: 'call-graph' | 'govulncheck' | 'none';
+  /** Why govulncheck did not contribute, when it was expected to. */
+  govulncheckError?: string;
   findings: Finding[];
 }

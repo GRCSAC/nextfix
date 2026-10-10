@@ -12,6 +12,8 @@ import { fetchEpss } from '../../engine/src/vulns/epss.ts';
 import { fetchKev } from '../../engine/src/vulns/kev.ts';
 import { decide } from '../../engine/src/decide/ssvc.ts';
 import { hasPythonProject } from '../../engine/src/inventory/python.ts';
+import { hasNodeProject } from '../../engine/src/inventory/node.ts';
+import { hasGoProject } from '../../engine/src/inventory/go.ts';
 import { detectSbomFiles } from '../../engine/src/inventory/container.ts';
 import { asList, loadConfig } from '../../engine/src/config.ts';
 import { ticketMarkdown, ticketTitle } from '../../engine/src/report/ticket.ts';
@@ -367,7 +369,7 @@ export function createNextFixServer(opts: ServerOptions) {
         const given = typeof body.dir === 'string' ? body.dir : '';
         const dir = given ? resolve(given) : '';
         if (!dir || !existsSync(dir) || !statSync(dir).isDirectory()) throw new HttpError(400, `Folder not found: ${clip(given)}`);
-        if (!existsSync(join(dir, 'package-lock.json')) && !hasPythonProject(dir) && !hasImageSources(dir)) throw new HttpError(400, 'That folder has no package-lock.json, no Python requirements or lockfile, no SBOM and no image in nextfix.config.json. NextFix scans npm and PyPI projects with pinned dependencies, and container images.');
+        if (!hasNodeProject(dir) && !hasPythonProject(dir) && !hasGoProject(dir) && !hasImageSources(dir)) throw new HttpError(400, 'That folder has no package-lock.json, yarn.lock or pnpm-lock.yaml, no Python requirements or lockfile, no go.mod, no SBOM and no image in nextfix.config.json. NextFix scans npm, PyPI and Go projects with pinned dependencies, and container images.');
         // The target is only recorded once the scan lock is ours, so a busy server never leaves an unscanned target behind.
         const result = await withScanLock(async () => {
           const target = opts.store.upsertTarget(dir);

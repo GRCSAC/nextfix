@@ -19,7 +19,7 @@ export function Apps({ targets, currentId, busy, onSelect, onAdd, onRemove }: Pr
     <div className="stack">
       <section className="card">
         <h2>Add an application</h2>
-        <p className="sub">A Node.js project with a <code>package-lock.json</code>, or a Python project with pinned requirements or a lockfile. The first scan runs right away.</p>
+        <p className="sub">A Node.js project (npm, yarn or pnpm lockfile), a Python project with pinned requirements or a lockfile, a Go module, or a folder with a container image or SBOM in its config. The first scan runs right away.</p>
         <form className="inline-form" onSubmit={(e) => { e.preventDefault(); if (dir.trim()) { onAdd(dir.trim()); setDir(''); } }}>
           <input type="text" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="C:\path\to\your\app" aria-label="Project folder" />
           <button type="submit" className="btn primary" disabled={busy || !dir.trim()}><I.plus /> Scan</button>

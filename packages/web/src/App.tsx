@@ -426,7 +426,7 @@ function Welcome({ onAdd, busy }: { onAdd: (dir: string) => void; busy: boolean 
     <div className="hero">
       <div className="tagline">Find › Prioritize › Fix › Prove</div>
       <h1>From findings to fixes.</h1>
-      <p>Point NextFix at a Node.js project with a <code>package-lock.json</code>, or a Python project with pinned <code>requirements.txt</code>, <code>Pipfile.lock</code>, <code>poetry.lock</code> or <code>uv.lock</code>. It works out which vulnerabilities are reachable and exposed, and tells you what to fix first.</p>
+      <p>Point NextFix at a Node.js project (<code>package-lock.json</code>, <code>yarn.lock</code> or <code>pnpm-lock.yaml</code>), a Python project with pinned requirements or a lockfile, a Go module, or a folder with a container image or SBOM in its config. It works out which vulnerabilities are reachable and exposed, and tells you what to fix first.</p>
       <form onSubmit={(e) => { e.preventDefault(); if (dir.trim()) onAdd(dir.trim()); }}>
         <input type="text" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="C:\path\to\your\app" aria-label="Project folder" autoFocus />
         <button type="submit" className="btn primary" disabled={busy || !dir.trim()}>Scan</button>

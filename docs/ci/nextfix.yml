@@ -1,0 +1,81 @@
+# NextFix in GitHub Actions: scan on every push to main and every pull request, upload the
+# SARIF to code scanning, keep the JSON report as an artifact, and on pull requests post
+# one comment with the verdict and the shortest path to green.
+#
+# Copy this file to .github/workflows/nextfix.yml in your repository. See docs/ci/README.md.
+
+name: NextFix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays 06:17 UTC: advisories, EPSS and KEV change without a commit.
+
+permissions:
+  contents: read # checkout
+  security-events: write # upload-sarif
+  pull-requests: write # the PR comment
+
+env:
+  NEXTFIX_VERSION: v0.9.0 # pin a tag; bump deliberately
+
+jobs:
+  nextfix:
+    name: Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # While the NextFix repository is private, clone a pinned tag with a read-only token
+      # (a fine-grained personal access token with "Contents: read" on GRCSAC/nextfix, stored as
+      # the NEXTFIX_TOKEN secret). Once the repository is public, drop the token from the URL.
+      - name: Install NextFix
+        run: |
+          git clone --quiet --depth 1 --branch "$NEXTFIX_VERSION" \
+            "https://x-access-token:${NEXTFIX_TOKEN}@github.com/GRCSAC/nextfix.git" "$RUNNER_TEMP/nextfix"
+          npm ci --prefix "$RUNNER_TEMP/nextfix" --omit=dev --ignore-scripts --no-audit --no-fund
+          echo "NEXTFIX=$RUNNER_TEMP/nextfix" >> "$GITHUB_ENV"
+        env:
+          NEXTFIX_TOKEN: ${{ secrets.NEXTFIX_TOKEN }}
+
+      # When the npm package exists, replace the step above with this one and use `nextfix`
+      # in place of `node "$NEXTFIX/packages/engine/src/cli.ts"` below:
+      #
+      # - name: Install NextFix
+      #   run: npm install --global "nextfix@${NEXTFIX_VERSION#v}"
+
+      # Exit code 3 fails the job when anything is decided Act ("fix now"); use --fail-on Attend
+      # for a stricter gate. The SARIF, artifact and comment steps run regardless.
+      - name: Scan
+        run: node "$NEXTFIX/packages/engine/src/cli.ts" scan . --json nextfix.json --sarif nextfix.sarif --fail-on Act --quiet
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # raises the GitHub API rate limit when deriving symbols from fix commits
+
+      - name: Upload SARIF to code scanning
+        if: always() && hashFiles('nextfix.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: nextfix.sarif
+          category: nextfix
+
+      - name: Keep the JSON report
+        if: always() && hashFiles('nextfix.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextfix-report
+          path: |
+            nextfix.json
+            nextfix.sarif
+          retention-days: 90
+
+      - name: Comment on the pull request
+        if: always() && github.event_name == 'pull_request' && hashFiles('nextfix.json') != ''
+        run: node "$NEXTFIX/scripts/pr-comment.mjs" nextfix.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v0.8.2` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v0.9.0` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -46,16 +46,19 @@ Dark by default, light and match-OS in Settings; works at phone width.
 
 ## The command line
 
-Point it at a Node.js project with a `package-lock.json`, or a Python project with pinned
-requirements or a lockfile (or both in one folder):
+Point it at a Node.js project (npm, yarn or pnpm lockfile, workspaces included), a Python
+project with pinned requirements or a lockfile, a Go module, or any mix in one folder:
 
 ```bash
 node packages/engine/src/cli.ts scan samples/express-shop --json out/report.json --vex out/report.openvex.json
 ```
 
+Go modules work the same way (`go.mod` + `go.sum`; install [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)
+for symbol-level verdicts, NextFix finds it on the PATH or through `NEXTFIX_GOVULNCHECK`).
 Add `--image <ref>` to inventory the built container image as well, or `--sbom <file>` to
 read a CycloneDX, SPDX or Grype JSON document you already have (see
-[Container images](#container-images)).
+[Container images](#container-images)). `--sarif <file>` writes SARIF 2.1.0 for GitHub code
+scanning; a ready-made workflow with a pull-request comment is in [docs/ci](docs/ci/README.md).
 
 In a pipeline, `--fail-on Act` (or `Attend`) exits with code 3 when any finding is decided
 that or worse, so a build can gate on "nothing to fix now" while the JSON report is kept as
@@ -94,17 +97,20 @@ Act · lodash@4.17.15 · CVE-2021-23337
 
 ### The pipeline
 
-1. **Inventory** — every component from `package-lock.json` and/or pinned Python
+1. **Inventory** — every component from `package-lock.json`, `yarn.lock` or `pnpm-lock.yaml` (workspaces included), `go.mod` + `go.sum`, and/or pinned Python
    dependencies (`requirements*.txt`, `Pipfile.lock`, `poetry.lock`, `uv.lock`), with dev /
    direct / transitive flags.
 2. **Advisories** — [OSV](https://osv.dev) for the advisories, [FIRST EPSS](https://www.first.org/epss/)
    for exploit probability, [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
    for confirmed in-the-wild exploitation. Cached locally in SQLite; `--offline` reuses the cache.
 3. **Code** — a call graph of your source (TypeScript compiler parser for JavaScript and
-   TypeScript, tree-sitter for Python), entry points with their mount prefixes and auth guards
-   for Express, Fastify, Koa, Flask, FastAPI and Django, and request data traced argument by
+   TypeScript, tree-sitter for Python and Go), entry points with their mount prefixes and auth
+   guards for Express, Fastify, Koa, Flask, FastAPI, Django, net/http, Gin, Echo, Chi, Fiber,
+   gorilla/mux and httprouter, and request data traced argument by
    argument from the handler to the vulnerable call.
-4. **Reachability** — one of six evidence-graded tiers per advisory (see below).
+4. **Reachability** — one of seven evidence-graded tiers per advisory (see below). For Go,
+   `govulncheck` adds the Go vulnerability database's symbol data and its own verdict on calls
+   made inside dependencies.
 5. **Exposure** — Dockerfile `EXPOSE`, compose `ports:`, and whether the app binds to loopback.
 6. **Decision** — an SSVC-style call: **Act**, **Attend**, **Track\***, **Track**, plus a 0–100 score
    for ordering and the "why" lines that justify it.
@@ -242,6 +248,12 @@ symbols from fix commits, which can take a few minutes for a large dependency tr
 | microblog (Flask, blueprints, flask-login) | 54 | 56 | 35 / 35 | 2 · 8 · 4 · 42 | 1 s |
 | OWASP PyGoat (Django, requirements.txt) | 34 | 141 | 137 / 137 | 4 · 16 · 15 · 106 | 2 s |
 | full-stack-fastapi-template (FastAPI, uv.lock) | 134 | 0 | 23 / 23 | — | 1 s |
+| gin-realworld (Gin, go.mod) | 43 | 58 | 27 / 27 | 0 · 0 · 20 · 45 | 9 s |
+| go-clean-arch (Echo) | 31 | 61 | 4 / 4 | 0 · 0 · 17 · 51 | 10 s |
+| go-test-bench (Gin + Chi + net/http + httprouter) | 53 | 75 | 20 / 20 | 1 · 11 · 11 · 59 | 11 s |
+| go-dvwa (net/http + gorilla/mux) | 68 | 55 | 3 / 3 | 0 · 5 · 18 · 39 | 9 s |
+| gophish (gorilla/mux; govulncheck needs cgo, fell back to package level) | 47 | 212 | 51 / 51 | 0 · 68 · 114 · 38 | 12 s |
+| govwa (httprouter) | — | — | 20 / 20 | — | — |
 
 What the first pass got wrong, and what changed because of it, is in the 0.4.1 entry of
 [CHANGELOG.md](CHANGELOG.md). What is still open: handlers NextFix cannot follow are listed
@@ -269,7 +281,8 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Vulnerable-symbol data | ✅ curated seed (7 advisories) + derived from fix commits |
 | Derived symbols from fix commits, with a review and export path | ✅ |
 | `nextfix.config.json` (auth guards, ignored dirs, internal routes) | ✅ |
-| Go (govulncheck wrapper) | ⬜ |
+| Go: go.mod/go.sum inventory, govulncheck symbols and verdicts, call graph for net/http, Gin, Echo, Chi, Fiber, gorilla/mux, httprouter | ✅ |
+| yarn.lock, pnpm-lock.yaml and workspaces (npm, yarn, pnpm) | ✅ |
 | Web UI: Overview, Findings, Components, Evidence, Reports, Apps, Settings | ✅ |
 | Brand applied (see docs/BRAND.md) | ✅ |
 | Server mode: SQLite history, trends, scan diff with reasons, finding history + SLA ageing, progress and cancel, JSON API | ✅ |
@@ -279,7 +292,7 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Container image inventory (syft binary or container; CycloneDX / SPDX / Grype input; distro ecosystems) | ✅ |
 | Jira / GitHub Issues export (per finding and bulk, links remembered) | ✅ |
 | CI gate (`--fail-on`, exit codes) | ✅ |
-| SARIF output for code-scanning tabs | ⬜ |
+| SARIF 2.1.0 output, GitHub Actions template with pull-request comment (docs/ci) | ✅ |
 | Packaging: single executable + Docker image | ⬜ |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for sequencing.

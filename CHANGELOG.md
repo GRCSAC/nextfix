@@ -5,6 +5,35 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-10
+
+### Added
+- **Go.** Inventory from `go.mod` and `go.sum` (require blocks, `// indirect`, `replace`
+  and `exclude`, the standard library as a component at the toolchain version); advisories
+  from OSV's Go ecosystem; a tree-sitter call graph with entry points, guards, mounts and
+  request data for net/http (including Go 1.22 method patterns), Gin, Echo, Chi, Fiber,
+  gorilla/mux and httprouter; and `govulncheck` as an optional binary (PATH or
+  `NEXTFIX_GOVULNCHECK`) that supplies the vulnerable symbols per advisory and its own
+  verdict for calls made inside dependencies. The decision model documents how the two
+  combine; the report records which route decided and why govulncheck could not run.
+  Validated on six real Go applications with every registered route found.
+- **SARIF 2.1.0 output** (`--sarif <file>`): one rule per advisory, one result per finding
+  with the lockfile location, the entry point and the vulnerable call as related locations,
+  levels error / warning / note / none by decision, validated against the official schema and
+  GitHub's code-scanning limits.
+- **GitHub Actions template** in `docs/ci/`: scan with `--fail-on Act`, upload the SARIF to
+  code scanning, keep the JSON as an artifact, and post or update a pull-request comment
+  with the verdict, the decision counts and the shortest path to green.
+- **yarn.lock (v1 and berry) and pnpm-lock.yaml (v5, v6, v9)** inventories, plus npm, yarn
+  and pnpm **workspaces**: nested lockfiles are read and merged, with every location kept.
+  Aliases resolve to the real package name as for npm.
+- Go fix commands (`go get module@version`, `go get toolchain@goX.Y.Z` for the standard
+  library).
+
+### Changed
+- The dashboard's add-application copy and the server's folder check accept yarn, pnpm and
+  Go projects.
+
 ## [0.8.2] — 2026-10-10
 
 The experience release: the Overview answers an executive's questions instead of counting

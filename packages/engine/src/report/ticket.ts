@@ -28,6 +28,8 @@ export function fixCommandFor(f: Finding): string | undefined {
   const { ecosystem: eco, name } = f.component;
   if (eco === 'npm') return `npm install ${name}@${v}`;
   if (eco === 'PyPI') return `pip install "${name}==${v}"`;
+  // The standard library is fixed by moving the toolchain, not a module.
+  if (eco === 'Go' && name === 'stdlib') return `go get toolchain@go${v.replace(/^v/, '')}`;
   if (eco === 'Go') return `go get ${name}@${v.startsWith('v') ? v : 'v' + v}`;
   if (eco === 'RubyGems') return `gem install ${name} -v ${v}`;
   if (eco === 'crates.io') return `cargo update -p ${name} --precise ${v}`;

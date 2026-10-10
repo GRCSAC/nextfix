@@ -69,6 +69,29 @@ Curated entries always outrank derived ones for the same advisory. `nextfix symb
 promotes a derived entry after a human looks at the commit; `export` turns confirmed entries
 into curated JSON for the repository.
 
+### Go: the call graph and govulncheck together
+
+Go modules get two sources of evidence. The project call graph (tree-sitter) finds entry
+points, guards and request data for net/http, Gin, Echo, Chi, Fiber, gorilla/mux and
+httprouter, and resolves calls into dependencies by module and exported name. `govulncheck`
+supplies the vulnerable symbols per advisory from the Go vulnerability database and its own
+verdict, which follows calls *inside* dependencies that the project graph does not see.
+
+| Situation | Tier | Confidence |
+|---|---|---|
+| graph has entry points and OSV lists symbols | `assessReach` as for any ecosystem | confirmed |
+| graph says less than govulncheck (govulncheck `called` but no graph path; `imported` but the graph saw no import) | govulncheck's verdict wins, below | confirmed |
+| govulncheck `called` (vulnerable symbol reached from the program's own entry points) | `called-unreached`, call sites from the trace | confirmed |
+| govulncheck `imported` only | `imported-not-called` (`imported-unknown-symbol` when the advisory lists no symbols) | confirmed / package-level |
+| govulncheck `required` only | `unused` | confirmed |
+| advisory unknown to the Go database, or govulncheck missing, failed or offline | `imported-unknown-symbol` for go.mod modules, `unused` for go.sum-only ones | package-level |
+
+The report records which route decided (`goAnalysis`: call-graph, govulncheck or none) and
+govulncheck's error when it could not run (a dependency that needs cgo on a machine without
+a C compiler is the common case). Known limit: a vulnerable call inside auth middleware is
+reached by every route but is modelled as called from a guard, not a handler, so it reports
+as called-unreached rather than reachable.
+
 ## 3. Exploitation
 
 - `active` — any CVE the advisory covers is in CISA KEV (the why line names it).
