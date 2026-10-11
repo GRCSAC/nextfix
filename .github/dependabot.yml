@@ -9,6 +9,13 @@ updates:
         dependency-type: production
       development:
         dependency-type: development
+    ignore:
+      # The engine is written against the TypeScript 5 compiler API; a major move is deliberate work.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # Type definitions follow the Node version NextFix runs on (24), not the newest Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
