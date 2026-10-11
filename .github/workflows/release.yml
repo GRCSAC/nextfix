@@ -174,7 +174,7 @@ jobs:
     if: false
     runs-on: windows-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: nextfix-win32-x64
           path: dist-bin/win32-x64
@@ -191,15 +191,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: nextfix-*
           path: artifacts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: image-sbom
           path: artifacts/image-sbom
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: self-scan
           path: artifacts/self-scan
