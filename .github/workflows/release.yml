@@ -54,7 +54,7 @@ jobs:
         run: node packaging/release-notes.mjs "${{ steps.version.outputs.version }}" > /dev/null
       - name: NextFix scans itself (OSV, EPSS and KEV over the network)
         run: node packages/engine/src/cli.ts scan . --fail-on Act --no-derive --json nextfix-self-scan.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: self-scan
           path: nextfix-self-scan.json
@@ -96,7 +96,7 @@ jobs:
           "$exe" --help
           "$exe" scan --help > /dev/null
           "$exe" serve --help > /dev/null
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nextfix-${{ matrix.target }}
           path: dist-bin/${{ matrix.target }}/
@@ -158,7 +158,7 @@ jobs:
           output-file: nextfix-${{ needs.check.outputs.version }}-image.spdx.json
           upload-artifact: false
           upload-release-assets: false
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: image-sbom
           path: nextfix-${{ needs.check.outputs.version }}-image.spdx.json
