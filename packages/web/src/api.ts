@@ -274,6 +274,8 @@ export const api = {
   setup: (body: { username: string; password: string; displayName: string }) => call<Session>('/api/setup', { method: 'POST', body: JSON.stringify(body) }),
   login: (body: { username: string; password: string }) => call<Session>('/api/login', { method: 'POST', body: JSON.stringify(body) }),
   logout: () => call<void>('/api/logout', { method: 'POST' }),
+  /** Stops the server process (admin, from the machine it runs on). */
+  shutdown: () => call<{ ok: boolean; message: string }>('/api/shutdown', { method: 'POST' }),
   oidcStartUrl: (provider: string) => `/api/auth/oidc/${encodeURIComponent(provider)}/start`,
   // users and tokens (admin)
   users: () => call<User[]>('/api/users'),

@@ -11,7 +11,7 @@ the executive and the engineer a short list with the evidence attached.
 Built by GRCSAC for small and medium businesses: self-contained, runs locally or on your
 own server, nothing leaves your network.
 
-**Current version:** `v1.0.0` · history in [CHANGELOG.md](CHANGELOG.md)
+**Current version:** `v1.0.1` · history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 

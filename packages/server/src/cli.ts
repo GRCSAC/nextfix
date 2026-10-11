@@ -177,10 +177,17 @@ async function main() {
     if (err.code === 'EACCES') fail(`Port ${port} needs elevated rights; try --port ${Math.max(port, 1024) + 1}`);
     fail(`cannot listen on ${host}:${port}: ${err.message}`);
   });
+  process.title = 'NextFix dashboards';
+  server.on('nextfix:shutdown', () => {
+    log('stopped from the dashboard');
+    shutdown();
+  });
   server.listen(port, host, () => {
     const actualPort = (server.address() as { port: number }).port;
     const url = `http://${host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host.includes(':') ? `[${host}]` : host}:${actualPort}`;
     console.log(`NextFix ${toolVersion()} — dashboards at ${url}`);
+    console.log('This window keeps the dashboards running. Closing the browser does not stop them;');
+    console.log('close this window, press Ctrl+C, or use "Stop the dashboards" in the account menu.');
     if (allowOpen) {
       console.error('WARNING: --allow-open is set. There is no sign-in: anyone who can reach this machine locally is an admin.');
       console.error('         Connections from other machines are refused. Drop the flag to use accounts.');

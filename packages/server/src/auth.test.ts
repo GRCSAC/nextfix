@@ -789,3 +789,18 @@ test('cli: user add reads the password from stdin and user password resets it', 
     store.close();
   }
 });
+
+test('POST /api/shutdown: an admin on loopback stops the server; the CLI hears the event', async () => {
+  const open = await fixture({ allowOpen: true });
+  try {
+    const heard = new Promise<void>((resolve) => open.app.once('nextfix:shutdown', () => resolve()));
+    const res = await open.api('/api/shutdown', { method: 'POST', body: '{}' });
+    assert.equal(res.status, 202);
+    assert.match(((await res.json()) as { message: string }).message, /stopping/);
+    await Promise.race([heard, new Promise((_, reject) => setTimeout(() => reject(new Error('no shutdown event')), 2000))]);
+    const rows = (await (await open.api('/api/audit')).json()) as { rows: { action: string }[] };
+    assert.ok(rows.rows.some((r) => r.action === 'server.shutdown'));
+  } finally {
+    open.close();
+  }
+});

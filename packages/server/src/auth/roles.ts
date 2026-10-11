@@ -36,6 +36,7 @@ export const BUILTIN_POLICY: RoutePolicy[] = [
   { method: 'POST', pattern: '/setup', public: true },
   { method: 'POST', pattern: '/login', public: true },
   { method: 'POST', pattern: '/logout', public: true },
+  { method: 'POST', pattern: '/shutdown', role: 'admin' },
   { method: 'GET', pattern: '/auth/oidc/:provider/start', public: true },
   { method: 'GET', pattern: '/auth/oidc/:provider/callback', public: true },
 

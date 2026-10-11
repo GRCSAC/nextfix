@@ -10,6 +10,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
   const [changing, setChanging] = useState(false);
+  const [stopped, setStopped] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -32,11 +33,29 @@ export function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => voi
           <div className="menu-head"><strong>{user.displayName}</strong><span className="muted small">@{user.username} · {ROLE_LABEL[user.role]}</span></div>
           <button type="button" role="menuitem" onClick={() => { setOpen(false); setChanging(true); }}><I.key /> Change password</button>
           <button type="button" role="menuitem" onClick={() => { setOpen(false); onSignOut(); }}><I.logout /> Sign out</button>
+          {user.role === 'admin' && <button type="button" role="menuitem" onClick={() => { setOpen(false); void stopServer(); }}><I.close /> Stop the dashboards</button>}
         </div>
       )}
       {changing && <ChangePasswordModal user={user} onClose={() => setChanging(false)} />}
+      {stopped && (
+        <div className="stopped-notice" role="alert">
+          <strong>The dashboards have stopped.</strong>
+          <p>{stopped}</p>
+          <p className="small muted">Start them again from the Start Menu ("NextFix dashboards") or with <code>nextfix serve</code>.</p>
+        </div>
+      )}
     </div>
   );
+
+  async function stopServer() {
+    if (!window.confirm('Stop the dashboards? The server process exits and this page stops working until it is started again.')) return;
+    try {
+      const r = await api.shutdown();
+      setStopped(r.message);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  }
 }
 
 export function ChangePasswordModal({ user, onClose }: { user: User; onClose: () => void }) {

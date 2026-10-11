@@ -187,3 +187,7 @@ table.tbl.portfolio tr.row:focus-visible { outline: 2px solid var(--accent); out
 /* ---------- mobile: rail pages reachable from the tab strip even without an open app ---------- */
 .tabs.mobile-nav { display: none; }
 @media (max-width: 900px) { .tabs.mobile-nav { display: flex; } }
+
+/* Shown after "Stop the dashboards": the page can no longer reach the server. */
+.stopped-notice { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center; gap: 6px; padding: 24px; text-align: center; background: var(--page); color: var(--ink); }
+.stopped-notice strong { font-size: 1.2rem; }

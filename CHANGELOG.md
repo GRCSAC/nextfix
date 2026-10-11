@@ -5,6 +5,14 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-10-11
+
+### Added
+- **Stop the dashboards** in the account menu (administrators, from the machine the server
+  runs on): shuts the server down cleanly and tells you the tab can be closed. The console
+  window the Start Menu entry opens now says that closing the browser does not stop the
+  server and how to stop it. `POST /api/shutdown` behind the same rules.
+
 ## [1.0.0] — 2026-10-10
 
 The first release meant to be installed rather than cloned.

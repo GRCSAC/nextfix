@@ -438,6 +438,18 @@ export function createNextFixServer(opts: ServerOptions) {
       return send(res, 200, { ok: true, version: toolVersion(), authMode: authModeOf(), scanning: scanningState(), dbPath: opts.store.path, cachePath, otherServer: opts.store.otherServer() });
     }
 
+    // ---- stop the server from the dashboard (admin, from the machine it runs on) ----
+    if (m === 'POST' && a === 'shutdown' && !b) {
+      ctx.requireRole('admin');
+      if (!isLoopbackAddress(ctx.ip)) throw new HttpError(403, 'The dashboards can only be stopped from the machine NextFix runs on');
+      if (scanningState()) throw new HttpError(409, 'A scan is running; cancel it first or wait for it to finish');
+      ctx.audit('server.shutdown', null, {});
+      send(res, 202, { ok: true, message: 'The dashboards are stopping. You can close this tab.' });
+      // Let the response leave before the process goes; the CLI listens for this event.
+      setTimeout(() => server.emit('nextfix:shutdown'), 250);
+      return;
+    }
+
     // ---- who am I, setup, sign in and out ----
     if (a === 'session' && m === 'GET') {
       const mode = authModeOf();
