@@ -185,7 +185,8 @@ choco apikey --key <api-key> --source https://push.chocolatey.org/      # once p
 choco push nextfix.<version>.nupkg --source https://push.chocolatey.org/
 ```
 
-Pass an absolute `--source` path: an elevated PowerShell opens in `System32`, where `.`
+The icon URL must be a CDN; moderators reject `raw.githubusercontent.com`, so the template
+points at jsDelivr pinned to the release tag. Pass an absolute `--source` path: an elevated PowerShell opens in `System32`, where `.`
 silently means the wrong directory. After the push, post in the **review comments** box on the
 package page the same day: no moderator sees a package until automated checks pass or the
 maintainer comments there, and a `403` on a later push usually means an earlier version is
