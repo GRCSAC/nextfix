@@ -127,7 +127,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push (linux/amd64, linux/arm64)
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         env:
           # The build record artifact is not a release asset; keeping it out keeps the release job's downloads clean.
           DOCKER_BUILD_RECORD_UPLOAD: false
