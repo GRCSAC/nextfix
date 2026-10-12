@@ -133,6 +133,13 @@ data lives (`~/.nextfix`), and that the dashboards run on the user's own machine
 **Support and security.** Issues on GitHub; security reports to nextfix@grcsac.com
 (`SECURITY.md` promises an acknowledgement within three working days).
 
+## 5a. The "How NextFix decides" one-pager
+
+A page explaining the three questions, the reachability ladder, the four decisions and why
+most findings can wait: copy, structure and design notes in `site/PRIORITY-ONEPAGER.md`, with
+the reference build `site/priority-onepager.html` (brand palette, light and dark, print-ready).
+Suggested URL `/how-it-decides/`, linked from the home page, the product page and the footer.
+
 ## 6. Assets
 
 - `brand/logo.svg` (the N mark; usable on light and dark), `brand/brand-sheet.png`.

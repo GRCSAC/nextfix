@@ -1,0 +1,295 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>How NextFix Decides</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f3f5f9; --surface: #ffffff; --surface-2: #eef1f6; --ink: #0b1220; --ink-2: #475569; --muted: #5b6675;
+    --grid: #e3e7ee; --border: rgba(11, 18, 32, 0.12); --accent: #2563eb; --cyan: #0e7490;
+    --act: #dc2626; --attend: #b45309; --watch: #0e7490; --aside: #2563eb; --good: #15803d;
+    --act-ink: #b91c1c; --attend-ink: #9a3412;
+    --wash: rgba(59, 130, 246, 0.08);
+    --display: "Sora", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0b1220; --surface: #0f1f3d; --surface-2: #152747; --ink: #f1f5f9; --ink-2: #b8c4d8; --muted: #94a3b8;
+      --grid: #1b2b4b; --border: rgba(148, 163, 184, 0.18); --accent: #3b82f6; --cyan: #22d3ee;
+      --act: #ef4444; --attend: #f59e0b; --watch: #22d3ee; --aside: #3b82f6; --good: #4ade80;
+      --act-ink: #fca5a5; --attend-ink: #fbbf24;
+      --wash: rgba(59, 130, 246, 0.16);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0b1220; --surface: #0f1f3d; --surface-2: #152747; --ink: #f1f5f9; --ink-2: #b8c4d8; --muted: #94a3b8;
+    --grid: #1b2b4b; --border: rgba(148, 163, 184, 0.18); --accent: #3b82f6; --cyan: #22d3ee;
+    --act: #ef4444; --attend: #f59e0b; --watch: #22d3ee; --aside: #3b82f6; --good: #4ade80;
+    --act-ink: #fca5a5; --attend-ink: #fbbf24;
+    --wash: rgba(59, 130, 246, 0.16);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font-family: var(--body); font-size: 14px; line-height: 1.45; padding-block: 24px; padding-inline: 16px; -webkit-font-smoothing: antialiased; }
+  .sheet { max-width: 1080px; margin: 0 auto; display: grid; gap: 18px; }
+  h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; }
+  p { margin: 0; }
+  .eyebrow { font-family: var(--display); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+  /* ---------- header ---------- */
+  .head { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: end; padding-bottom: 14px; border-bottom: 2px solid var(--grid); }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .brand svg { width: 34px; height: 34px; }
+  .brand .word { font-family: var(--display); font-weight: 800; font-size: 1.25rem; letter-spacing: -0.01em; }
+  .brand .word b { color: var(--accent); font-weight: 800; }
+  .brand .tag { font-family: var(--display); font-size: 0.7rem; letter-spacing: 0.16em; color: var(--muted); font-weight: 600; margin-left: 10px; }
+  h1 { font-size: clamp(1.6rem, 3.4vw, 2.3rem); font-weight: 800; line-height: 1.12; letter-spacing: -0.015em; }
+  .lede { font-size: 1.02rem; color: var(--ink-2); max-width: 62ch; margin-top: 8px; }
+  .verdict-key { display: grid; gap: 6px; min-width: 240px; }
+  .verdict-key .row { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: center; font-size: 0.86rem; }
+  .verdict-key .dot { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-size: 0.7rem; font-weight: 800; }
+  .verdict-key b { font-family: var(--display); font-weight: 700; }
+  .verdict-key span.m { color: var(--muted); }
+
+  /* ---------- three questions ---------- */
+  .questions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .q { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 16px 14px; display: grid; gap: 8px; align-content: start; }
+  .q .n { font-family: var(--display); font-size: 2.4rem; font-weight: 800; line-height: 1; color: var(--accent); opacity: 0.9; }
+  .q h2 { font-size: 1.15rem; font-weight: 700; }
+  .q .ask { color: var(--ink-2); font-size: 0.92rem; }
+  .q ul { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+  .q li { display: grid; grid-template-columns: 8px 1fr; gap: 9px; align-items: start; font-size: 0.86rem; color: var(--ink-2); }
+  .q li::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--accent); margin-top: 6px; }
+  .q.exposed li::before { background: var(--cyan); }
+  .q.exploited li::before { background: var(--act); }
+  .q li b { color: var(--ink); font-weight: 600; }
+  .q .arrow { position: absolute; right: -15px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: grid; place-items: center; font-size: 0.8rem; color: var(--muted); z-index: 1; }
+
+  /* ---------- the ladder ---------- */
+  .ladder { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: grid; gap: 12px; }
+  .ladder-head { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+  .ladder h2 { font-size: 1.1rem; font-weight: 700; }
+  .ladder .sub { color: var(--muted); font-size: 0.86rem; }
+  .rungs { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: stretch; }
+  .rung { display: grid; gap: 4px; align-content: start; padding: 10px 10px 9px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--c) 45%, var(--border)); background: color-mix(in srgb, var(--c) 10%, var(--surface)); --c: var(--aside); min-height: 118px; }
+  .rung .k { font-family: var(--display); font-size: 0.78rem; font-weight: 700; line-height: 1.2; }
+  .rung .d { font-size: 0.74rem; color: var(--ink-2); line-height: 1.35; }
+  .rung .pill { margin-top: auto; justify-self: start; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--c); }
+  .rung.watch { --c: var(--watch); } .rung.attend { --c: var(--attend); } .rung.act { --c: var(--act); }
+  .rung.watch .pill { color: var(--watch); } .rung.attend .pill { color: var(--attend-ink); } .rung.act .pill { color: var(--act-ink); }
+  .ladder-bar { height: 8px; border-radius: 6px; background: linear-gradient(90deg, var(--aside) 0 38%, var(--watch) 38% 72%, var(--attend) 72% 86%, var(--act) 86% 100%); }
+  .ladder-scale { display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--muted); font-family: var(--display); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+
+  /* ---------- decisions ---------- */
+  .decisions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .dec { border-radius: 14px; padding: 14px 14px 12px; border: 1px solid color-mix(in srgb, var(--c) 50%, var(--border)); background: color-mix(in srgb, var(--c) 9%, var(--surface)); --c: var(--aside); display: grid; gap: 8px; align-content: start; }
+  .dec.act { --c: var(--act); } .dec.attend { --c: var(--attend); } .dec.watch { --c: var(--watch); }
+  .dec .top { display: flex; align-items: center; gap: 9px; }
+  .dec .icon { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: #fff; font-weight: 800; font-size: 0.95rem; flex: none; }
+  .dec.watch .icon, .dec.aside .icon { color: #0b1220; }
+  .dec h3 { font-size: 1rem; font-weight: 700; line-height: 1.15; }
+  .dec h3 small { display: block; font-family: var(--body); font-weight: 500; font-size: 0.74rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+  .dec .when { font-size: 0.84rem; color: var(--ink-2); }
+  .dec .when b { color: var(--ink); font-weight: 600; }
+  .dec .means { font-size: 0.8rem; color: var(--muted); border-top: 1px dashed color-mix(in srgb, var(--c) 40%, var(--border)); padding-top: 7px; }
+
+  /* ---------- why things can wait ---------- */
+  .why { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+  .panel h2 { font-size: 1.1rem; font-weight: 700; }
+  .panel .sub { color: var(--muted); font-size: 0.86rem; }
+  .reasons { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+  .reasons li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; }
+  .reasons .b { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-family: var(--display); font-weight: 800; font-size: 0.8rem; background: var(--wash); color: var(--accent); }
+  .reasons h3 { font-size: 0.92rem; font-weight: 700; }
+  .reasons p { font-size: 0.84rem; color: var(--ink-2); margin-top: 2px; }
+  .moves { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .moves h3 { font-size: 0.82rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+  .moves h3.up { color: var(--act-ink); } .moves h3.down { color: var(--good); }
+  .moves ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+  .moves li { font-size: 0.82rem; color: var(--ink-2); padding-left: 14px; position: relative; }
+  .moves li::before { content: "▲"; position: absolute; left: 0; top: 1px; font-size: 0.6rem; color: var(--act); }
+  .moves .down-list li::before { content: "▼"; color: var(--good); }
+  .moves li b { color: var(--ink); font-weight: 600; }
+  .trump { margin-top: 2px; padding: 9px 11px; border-radius: 10px; background: color-mix(in srgb, var(--act) 9%, var(--surface)); border: 1px solid color-mix(in srgb, var(--act) 40%, var(--border)); font-size: 0.82rem; color: var(--ink-2); }
+  .trump b { color: var(--act-ink); }
+
+  /* ---------- footer ---------- */
+  .foot { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: start; padding-top: 12px; border-top: 2px solid var(--grid); font-size: 0.78rem; color: var(--muted); }
+  .foot b { color: var(--ink-2); font-weight: 600; }
+  .foot .right { text-align: right; white-space: nowrap; }
+
+  @media screen and (max-width: 900px) {
+    .questions, .decisions { grid-template-columns: 1fr; }
+    .rungs { grid-template-columns: repeat(2, 1fr); }
+    .rung { min-height: 0; }
+    .why, .moves, .head, .foot { grid-template-columns: 1fr; }
+    .q .arrow { display: none; }
+    .foot .right { text-align: left; white-space: normal; }
+  }
+  @media screen and (max-width: 480px) { .rungs { grid-template-columns: 1fr; } }
+  @media print {
+    /* One tall sheet, printed light: readers scale it to Letter or A4 from the print dialog. */
+    @page { size: 210mm 380mm; margin: 8mm; }
+    :root {
+      --page: #ffffff; --surface: #ffffff; --surface-2: #eef1f6; --ink: #0b1220; --ink-2: #475569; --muted: #5b6675;
+      --grid: #e3e7ee; --border: rgba(11, 18, 32, 0.14); --accent: #2563eb; --cyan: #0e7490;
+      --act: #dc2626; --attend: #b45309; --watch: #0e7490; --aside: #2563eb; --good: #15803d;
+      --act-ink: #b91c1c; --attend-ink: #9a3412; --wash: rgba(59, 130, 246, 0.08);
+    }
+    body { background: #fff; padding: 0; zoom: 0.68; }
+    .sheet { max-width: none; gap: 12px; }
+    .q, .ladder, .dec, .panel { break-inside: avoid; box-shadow: none; }
+    .rung { min-height: 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .dec:hover, .q:hover { transform: translateY(-1px); transition: transform 0.15s; }
+  }
+</style>
+
+<main class="sheet">
+  <header class="head">
+    <div>
+      <div class="brand">
+        <svg viewBox="0 0 80 80" aria-hidden="true"><defs><linearGradient id="nfg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#60a5fa"/><stop offset="0.55" stop-color="#3b82f6"/><stop offset="1" stop-color="#1d4ed8"/></linearGradient></defs><path d="M4 78V2h18l34 46V2h18v76H58L22 32v46z" fill="url(#nfg)"/></svg>
+        <span class="word">Next<b>Fix</b>™</span>
+        <span class="tag">FIND › PRIORITIZE › FIX › PROVE</span>
+      </div>
+      <h1>How NextFix decides what to fix next</h1>
+      <p class="lede">Scanners find. NextFix decides. Every vulnerability a scanner reports is asked three questions about <em>your</em> application, then lands in one of four decisions with its evidence attached. Most findings can wait, and the page says exactly why.</p>
+    </div>
+    <div class="verdict-key" aria-label="The four decisions">
+      <div class="eyebrow">Four decisions</div>
+      <div class="row"><span class="dot" style="background: var(--act)">▲</span><span><b>Fix now</b> <span class="m">· out of cycle</span></span></div>
+      <div class="row"><span class="dot" style="background: var(--attend)">●</span><span><b>Fix next cycle</b> <span class="m">· tell the owner</span></span></div>
+      <div class="row"><span class="dot" style="background: var(--watch); color: #0b1220">◐</span><span><b>Watch</b> <span class="m">· re-check on new data</span></span></div>
+      <div class="row"><span class="dot" style="background: var(--aside)">○</span><span><b>Set aside with evidence</b> <span class="m">· VEX for the auditor</span></span></div>
+    </div>
+  </header>
+
+  <section class="questions" aria-label="The three questions">
+    <article class="q">
+      <div class="n">1</div>
+      <h2>Reachable?</h2>
+      <p class="ask">Can a request from outside actually run the vulnerable code?</p>
+      <ul>
+        <li><span><b>Is it shipped?</b> Development-only packages never leave the build.</span></li>
+        <li><span><b>Is it imported?</b> Installed is not the same as used.</span></li>
+        <li><span><b>Is the vulnerable function called?</b> One bad function in a library of hundreds.</span></li>
+        <li><span><b>Does an entry point lead there?</b> The route, its auth guard, and whether request data reaches the call.</span></li>
+      </ul>
+      <span class="arrow" aria-hidden="true">›</span>
+    </article>
+    <article class="q exposed">
+      <div class="n">2</div>
+      <h2>Exposed?</h2>
+      <p class="ask">How close is an attacker to that route?</p>
+      <ul>
+        <li><span><b>Without a login</b> or behind one.</span></li>
+        <li><span><b>Network-published:</b> Dockerfile, compose, the listen address.</span></li>
+        <li><span><b>Internet-facing:</b> infrastructure files, or a declaration.</span></li>
+        <li><span><b>Observed traffic:</b> the access logs, last 30 days, public versus internal addresses.</span></li>
+      </ul>
+      <span class="arrow" aria-hidden="true">›</span>
+    </article>
+    <article class="q exploited">
+      <div class="n">3</div>
+      <h2>Exploited?</h2>
+      <p class="ask">Is anyone attacking this in the wild?</p>
+      <ul>
+        <li><span><b>Active:</b> on CISA's Known Exploited Vulnerabilities list.</span></li>
+        <li><span><b>Likely:</b> EPSS gives it a 10% or higher chance of exploitation within 30 days.</span></li>
+        <li><span><b>None yet:</b> severity alone, which is the weakest signal of the three.</span></li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="ladder" aria-label="The reachability ladder">
+    <div class="ladder-head">
+      <h2>The reachability ladder: seven rungs from "found" to "matters"</h2>
+      <span class="sub">Each rung is a fact about your code, checked in order. A finding stops at the first rung it fails.</span>
+    </div>
+    <div class="rungs">
+      <div class="rung"><span class="k">Not shipped</span><span class="d">A development dependency; it is not in the production artifact.</span><span class="pill">Set aside</span></div>
+      <div class="rung"><span class="k">Never imported</span><span class="d">Installed by the lockfile, but no source file loads it.</span><span class="pill">Set aside</span></div>
+      <div class="rung"><span class="k">Imported, never called</span><span class="d">The package is used, the vulnerable function is not.</span><span class="pill">Set aside</span></div>
+      <div class="rung watch"><span class="k">No function data yet</span><span class="d">Imported, but which function is vulnerable is still unknown, so it cannot be ruled out.</span><span class="pill">Watch</span></div>
+      <div class="rung watch"><span class="k">Called, unreached</span><span class="d">The function is called, but no HTTP route leads to that code.</span><span class="pill">Watch</span></div>
+      <div class="rung watch"><span class="k">In the image only</span><span class="d">An OS package or tool in the container; the application never imports it.</span><span class="pill">Watch · next cycle with a fix</span></div>
+      <div class="rung act"><span class="k">Reachable</span><span class="d">An entry point leads to the vulnerable call. Now exposure and exploitation decide.</span><span class="pill">Fix now · next cycle</span></div>
+    </div>
+    <div class="ladder-bar" aria-hidden="true"></div>
+    <div class="ladder-scale" aria-hidden="true"><span>Audit-defensible evidence</span><span>Worth watching</span><span>Action</span></div>
+  </section>
+
+  <section class="decisions" aria-label="When each decision applies">
+    <article class="dec act">
+      <div class="top"><span class="icon">▲</span><h3>Fix now<small>Act · out of cycle</small></h3></div>
+      <p class="when">Reachable <b>without a login</b>, and any of: known or likely exploitation, CVSS 9 or higher, request data reaching a high-severity call, or the internet already calling that route. Reachable <b>behind a login</b> only when exploitation is active.</p>
+      <p class="means">An attacker has a path, a door, and a reason. Nothing else on the list is this.</p>
+    </article>
+    <article class="dec attend">
+      <div class="top"><span class="icon">●</span><h3>Fix next cycle<small>Attend · tell the owner</small></h3></div>
+      <p class="when">Reachable, but <b>behind a login</b>, or without exploitation evidence. Also: no function data yet with exploitation or high severity, or an image package with a fix and a reason to move.</p>
+      <p class="means">Real, but the door is smaller or nobody is pushing on it. It goes in the next release, not tonight's hotfix.</p>
+    </article>
+    <article class="dec watch">
+      <div class="top"><span class="icon">◐</span><h3>Watch<small>Track* · re-check</small></h3></div>
+      <p class="when">Called but <b>no route reaches it</b>; imported with <b>no function data</b>; or in the container image with no fix to move to.</p>
+      <p class="means">Re-decided every night with fresh exploit data, and again when the code changes. It rises the moment the facts do.</p>
+    </article>
+    <article class="dec aside">
+      <div class="top"><span class="icon">○</span><h3>Set aside with evidence<small>Track · VEX</small></h3></div>
+      <p class="when">Not shipped, never imported, or the vulnerable function is <b>never called</b>. Or a person accepted it, with a reason, an approver and an expiry.</p>
+      <p class="means">Exported as an OpenVEX statement with the standard justification, so the auditor gets the reason, not a shrug.</p>
+    </article>
+  </section>
+
+  <section class="why">
+    <div class="panel">
+      <h2>Why most findings can wait</h2>
+      <p class="sub">Severity scores describe the worst case for anyone. NextFix describes the actual case for you.</p>
+      <ul class="reasons">
+        <li><span class="b">1</span><div><h3>A critical score in code you never run is noise.</h3><p>Eighty to ninety-nine percent of findings on real applications are in packages that are not shipped, not imported, or whose vulnerable function is never called. They are set aside with the proof.</p></div></li>
+        <li><span class="b">2</span><div><h3>Behind a login is a smaller door.</h3><p>An attacker needs credentials first. The finding is still fixed, in the next cycle, unless it is being exploited in the wild.</p></div></li>
+        <li><span class="b">3</span><div><h3>Nobody is calling it, yet.</h3><p>Thirty days of access logs with no request to any route that reaches the call holds a severity-only "fix now" at "next cycle". The first request, or new exploit data, lifts it back.</p></div></li>
+        <li><span class="b">4</span><div><h3>Not on the internet.</h3><p>A service the infrastructure files, or the logs, show as internal only has an internal attacker surface. An open route there waits a cycle; the same route on the internet does not.</p></div></li>
+        <li><span class="b">5</span><div><h3>No fix to move to.</h3><p>A finding with no published fix is watched and mitigated at the entry point rather than scheduled, so the queue holds work someone can actually do.</p></div></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>What moves a finding</h2>
+      <p class="sub">The same evidence that lets things wait also pulls things forward.</p>
+      <div class="moves">
+        <div>
+          <h3 class="up">Lifts it</h3>
+          <ul>
+            <li><b>Known exploitation</b> (CISA KEV) or EPSS at 10% or more</li>
+            <li><b>No login</b> on the route that reaches the call</li>
+            <li><b>Request data</b> traced into the vulnerable call's arguments</li>
+            <li><b>Public traffic</b> observed on that route in the last 30 days</li>
+            <li><b>Internet-facing</b> per infrastructure files or a declaration</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="down">Holds it</h3>
+          <ul class="down-list">
+            <li><b>Behind a login</b>, or treated as internal in the project config</li>
+            <li><b>Nobody called it</b> in a month of logs that cover this service</li>
+            <li><b>Internal only</b>: the internet cannot reach the service</li>
+            <li><b>Loopback only</b>: the service binds to the local host</li>
+            <li><b>A person accepted it</b>, with a reason and an expiry</li>
+          </ul>
+        </div>
+      </div>
+      <p class="trump"><b>One rule outranks every hold:</b> known or likely exploitation keeps a reachable finding at Fix now. Quiet routes and internal networks lower the bar for severity, never for evidence of attack.</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p><b>The score (0 to 100) only orders findings inside a decision; it never changes one.</b> Every decision carries its "why" in plain words: the route, the call, the guard, the traffic, the exploit data, the fix. Data: OSV advisories, FIRST EPSS, CISA KEV, your own logs and infrastructure files. Nothing leaves your machine but those lookups.</p>
+    <p class="right">nextfix.grcsac.com · Apache-2.0 · free<br>NextFix and the NextFix logo are trademarks of GRCSAC LLC.</p>
+  </footer>
+</main>
+</html>
