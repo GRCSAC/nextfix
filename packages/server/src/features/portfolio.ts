@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Decision, Finding, ScanReport, ScanSummary } from '../../../engine/src/types.ts';
 import { FeatureError, type Route } from './core.ts';
 import { activeExceptions, applyExceptions, isInForce, latestReport, targetExists } from './exceptions.ts';
+import { MAX_LOG_PATH, MAX_LOG_SOURCES, parseAccessLogs } from './surface.ts';
 
 /*
  * Portfolio: one row per application with its posture, computed from the latest report (after
@@ -70,6 +71,23 @@ export function slaSettings(db: DatabaseSync): SlaDays {
 }
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** 1200 → "1.2k", 41200 → "41k" (same rule as the dashboard's format.ts). */
+export function compact(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+}
+
+/** "the 30 days to Oct 11", as the dashboard words the traffic window. */
+export function windowPhrase(report: ScanReport): string {
+  const t = report.traffic;
+  if (!t?.to) return '';
+  const d = new Date(t.to);
+  return `the ${t.windowDays} days to ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
 
 /** Worst case first: unauthenticated and carrying request data, then unauthenticated, then any with data. */
 export function bestPath(f: Finding) {
@@ -90,15 +108,17 @@ export function verdict(report: ScanReport): Verdict {
     const f = act[0]!;
     const p = bestPath(f);
     const one = act.length === 1;
+    const seen = p && !p.entry.authenticated && (p.entry.traffic?.public ?? 0) > 0 ? p.entry.traffic!.public : 0;
     const bits = [
       `${one ? 'One vulnerability is' : `${act.length} vulnerabilities are`} reachable ${p ? (p.entry.authenticated ? 'behind a login' : 'without a login') : 'from the code'}`,
       p?.userInput ? (one ? 'carries request data' : 'carry request data') : undefined,
       f.kev ? `and ${one ? 'is' : 'the worst is'} on CISA's known-exploited list` : (f.epss?.score ?? 0) >= 0.1 ? `and ${one ? 'has' : 'the worst has'} a ${pct(f.epss!.score)} chance of exploitation within 30 days` : undefined,
     ].filter(Boolean);
+    const observed = seen ? ` The internet is already calling that route: ${compact(seen)} public request${seen === 1 ? '' : 's'} in ${windowPhrase(report)}.` : '';
     return {
       posture: 'Exposed',
       decision: 'Act',
-      headline: `${bits.join(', ')}.`,
+      headline: `${bits.join(', ')}.${observed}`,
       detail: `${f.component.name} ${f.component.version} · ${f.advisory.cve ?? f.advisory.id}${p ? ` · ${p.entry.method} ${p.entry.path}` : ''}${f.advisory.fixedVersion ? ` · fix: upgrade to ${f.advisory.fixedVersion}` : ' · no fix published yet'}`,
       findingId: f.id,
     };
@@ -172,6 +192,7 @@ interface TargetRaw {
   name: string | null;
   owner: string | null;
   schedule_hours: number | null;
+  access_logs: string | null;
 }
 
 export interface TargetMeta {
@@ -180,19 +201,21 @@ export interface TargetMeta {
   dir: string;
   owner: string | null;
   schedule: { everyHours: number } | null;
+  /** Access logs the scan reads for this application (files or folders; may be absolute). */
+  accessLogs: string[];
 }
 
 function toMeta(r: TargetRaw): TargetMeta {
-  return { id: r.id, name: r.name ?? r.dir, dir: r.dir, owner: r.owner, schedule: r.schedule_hours ? { everyHours: r.schedule_hours } : null };
+  return { id: r.id, name: r.name ?? r.dir, dir: r.dir, owner: r.owner, schedule: r.schedule_hours ? { everyHours: r.schedule_hours } : null, accessLogs: parseAccessLogs(r.access_logs) };
 }
 
 export function listTargetMeta(db: DatabaseSync): TargetMeta[] {
-  const rows = db.prepare('SELECT id, dir, name, owner, schedule_hours FROM targets ORDER BY name, dir').all() as unknown as TargetRaw[];
+  const rows = db.prepare('SELECT id, dir, name, owner, schedule_hours, access_logs FROM targets ORDER BY name, dir').all() as unknown as TargetRaw[];
   return rows.map(toMeta);
 }
 
 export function getTargetMeta(db: DatabaseSync, id: number): TargetMeta | undefined {
-  const r = db.prepare('SELECT id, dir, name, owner, schedule_hours FROM targets WHERE id = ?').get(id) as TargetRaw | undefined;
+  const r = db.prepare('SELECT id, dir, name, owner, schedule_hours, access_logs FROM targets WHERE id = ?').get(id) as TargetRaw | undefined;
   return r ? toMeta(r) : undefined;
 }
 
@@ -236,6 +259,7 @@ export function portfolio(db: DatabaseSync, nowMs = Date.now()): { targets: Port
 export interface TargetPatch {
   owner?: string | null;
   schedule?: { everyHours: number } | null;
+  accessLogs?: string[] | null;
 }
 
 /** Validate a PATCH body; unknown keys are ignored, absent keys left alone. */
@@ -253,6 +277,16 @@ export function parseTargetPatch(body: Record<string, unknown>): TargetPatch {
     else if (v && typeof v === 'object' && Number.isInteger((v as { everyHours?: unknown }).everyHours) && (v as { everyHours: number }).everyHours >= 1 && (v as { everyHours: number }).everyHours <= 24 * 365) out.schedule = { everyHours: (v as { everyHours: number }).everyHours };
     else throw new FeatureError(400, 'schedule must be { everyHours: 1..8760 } or null');
   }
+  if ('accessLogs' in body) {
+    const v = body.accessLogs;
+    if (v === null) out.accessLogs = null;
+    else if (Array.isArray(v) && v.every((x) => typeof x === 'string')) {
+      const list = [...new Set((v as string[]).map((x) => x.trim()).filter(Boolean))];
+      if (list.length > MAX_LOG_SOURCES) throw new FeatureError(400, `accessLogs may list at most ${MAX_LOG_SOURCES} files or folders`);
+      if (list.some((x) => x.length > MAX_LOG_PATH || /[\0\r\n]/.test(x))) throw new FeatureError(400, `each access log path must be one line of at most ${MAX_LOG_PATH} characters`);
+      out.accessLogs = list.length ? list : null;
+    } else throw new FeatureError(400, 'accessLogs must be a list of file or folder paths, or null');
+  }
   return out;
 }
 
@@ -260,6 +294,7 @@ export function updateTargetMeta(db: DatabaseSync, id: number, patch: TargetPatc
   if (!targetExists(db, id)) throw new FeatureError(404, 'Target not found');
   if (patch.owner !== undefined) db.prepare('UPDATE targets SET owner = ? WHERE id = ?').run(patch.owner, id);
   if (patch.schedule !== undefined) db.prepare('UPDATE targets SET schedule_hours = ? WHERE id = ?').run(patch.schedule ? patch.schedule.everyHours : null, id);
+  if (patch.accessLogs !== undefined) db.prepare('UPDATE targets SET access_logs = ? WHERE id = ?').run(patch.accessLogs ? JSON.stringify(patch.accessLogs) : null, id);
   return getTargetMeta(db, id)!;
 }
 

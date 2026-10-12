@@ -359,7 +359,7 @@ export function createNextFixServer(opts: ServerOptions) {
     });
     // The signal is passed whether or not the engine's ScanOptions declares it yet; an engine that
     // ignores it keeps running in the background after a cancel and its result is dropped.
-    const options: ScanOptions & { signal?: AbortSignal } = { log: scanLog, signal: controller.signal };
+    const options: ScanOptions & { signal?: AbortSignal } = { log: scanLog, signal: controller.signal, accessLogs: target.accessLogs };
     const work = scanner(target.dir, options);
     work.catch(() => {});
     try {

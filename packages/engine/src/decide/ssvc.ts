@@ -23,6 +23,7 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
   const bestPath = reach.paths.find((p) => !p.entry.authenticated && p.userInput) ?? reach.paths.find((p) => !p.entry.authenticated) ?? reach.paths.find((p) => p.userInput) ?? reach.paths[0];
   const unauth = !!bestPath && !bestPath.entry.authenticated;
   const userInput = !!bestPath?.userInput;
+  const obs = observedFor(f);
 
   let decision: Decision;
   switch (reach.tier) {
@@ -58,8 +59,11 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
       break;
     }
     case 'reachable': {
-      if (unauth) decision = exploitation !== 'none' || (cvss ?? 0) >= 9 || (userInput && (cvss ?? 0) >= 7) ? 'Act' : 'Attend';
-      else decision = exploitation === 'active' ? 'Act' : 'Attend';
+      if (unauth) {
+        // Public traffic on the route makes the exposure a fact rather than an inference, so the severity bar drops.
+        const seenPublic = obs.publicOnOpen > 0 && ((cvss ?? 0) >= 7 || (userInput && (cvss ?? 0) >= 5));
+        decision = exploitation !== 'none' || (cvss ?? 0) >= 9 || (userInput && (cvss ?? 0) >= 7) || seenPublic ? 'Act' : 'Attend';
+      } else decision = exploitation === 'active' ? 'Act' : 'Attend';
       why.push(`Reachable: ${describePath(bestPath!)}.`);
       if (bestPath!.userInput && bestPath!.taintedArgument) {
         const t = bestPath!.taintedArgument;
@@ -81,6 +85,30 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
         const n = reach.paths.filter((p) => p.userInput).length;
         why.push(`${reach.paths.length} entry points reach this call in total, ${n} of them carrying request data.`);
       }
+      // Observed traffic: what the access logs recorded for the route the decision rests on.
+      if (obs.read) {
+        const e = bestPath!.entry;
+        const t = e.traffic!;
+        const route = `${e.method} ${e.path}`;
+        const n = (k: number) => k.toLocaleString('en-US');
+        if (t.public > 0) {
+          const lifted = unauth && decision === 'Act' && exploitation === 'none' && (cvss ?? 0) < 9 && !(userInput && (cvss ?? 0) >= 7);
+          why.push(`Observed: ${route} received ${n(t.requests)} request${t.requests === 1 ? '' : 's'} in the ${obs.days} days to ${obs.to}, ${n(t.public)} from public addresses${e.authenticated ? ' (behind a login)' : ''}${t.lastSeenAt ? `, the last on ${t.lastSeenAt.slice(0, 10)}` : ''}.${lifted ? ' The internet is already calling this route, so this is Act rather than Attend.' : ''}`);
+        } else if (t.requests > 0) why.push(`Observed: ${route} received ${n(t.requests)} request${t.requests === 1 ? '' : 's'} in the ${obs.days} days to ${obs.to}, all from internal addresses.`);
+        else {
+          why.push(`Observed: no request reached ${route}${obs.allCold && reach.paths.length > 1 ? ' or any other route to this call' : ''} in the ${obs.days} days of logs to ${obs.to}.`);
+          if (unauth && decision === 'Act' && exploitation === 'none' && obs.allCold && obs.usable) {
+            decision = 'Attend';
+            why.push('Demoted from Act to Attend: the route is reachable in the code but nobody has called it; it is re-decided when traffic appears or exploit data changes.');
+          } else if (obs.stale) why.push('The logs end more than a month before this scan, so they are reported but do not lower the decision.');
+          else if (!obs.usable && obs.allCold) why.push('The window is shorter than two weeks, so the quiet route is reported but does not lower the decision.');
+        }
+      }
+      // Internet reach, when it is known and the decision would otherwise rest on an inference.
+      if (unauth && decision === 'Act' && exploitation === 'none' && exposure.reach === 'internal' && obs.publicOnOpen === 0) {
+        decision = 'Attend';
+        why.push(`Demoted from Act to Attend: the service is not reachable from the internet (${(exposure.reachEvidence ?? []).join('; ')}), so the open route is open to the internal network only.`);
+      }
       break;
     }
   }
@@ -93,6 +121,8 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
   if (exposure.network === 'published') why.push(`Service is network-published: ${exposure.evidence.join('; ')}.`);
   else if (exposure.network === 'local-only') why.push('Service binds to loopback only; network exposure is limited to the host.');
   else why.push('Network exposure unknown (no Dockerfile EXPOSE or compose ports found).');
+  if (exposure.reach === 'internet') why.push(`Internet-facing: ${(exposure.reachEvidence ?? []).join('; ')}.`);
+  else if (exposure.reach === 'internal') why.push(`Not reachable from the internet: ${(exposure.reachEvidence ?? []).join('; ')}.`);
 
   const epssText = f.epss ? `EPSS ${(f.epss.score * 100).toFixed(2)}% (percentile ${(f.epss.percentile * 100).toFixed(0)})` : 'no EPSS score';
   const kevName = f.kev?.cve && f.kev.cve !== (a.cve ?? a.id) ? ` (${f.kev.cve}, one of ${(a.cves ?? []).length} CVEs in this advisory)` : '';
@@ -108,10 +138,36 @@ export function decide(f: Input): Pick<Finding, 'decision' | 'score' | 'why' | '
     why.push('No fixed version is published yet.');
   }
 
-  return { decision, score: score(f, exploitation, unauth, userInput), why, fix, exploitation };
+  return { decision, score: score(f, exploitation, unauth, userInput, obs), why, fix, exploitation };
 }
 
-function score(f: Input, exploitation: Exploitation, unauth: boolean, userInput: boolean): number {
+interface Observed {
+  /** Access logs were read and cover this finding's routes. */
+  read: boolean;
+  /** Public requests on the unauthenticated route the decision rests on. */
+  publicOnOpen: number;
+  /** No route to the vulnerable call received a request. */
+  allCold: boolean;
+  /** The window is long enough (14 days), current, and covers routes of this service. */
+  usable: boolean;
+  stale: boolean;
+  days: number;
+  to: string;
+}
+
+/** What the logs recorded for the routes that reach this finding; `read` is false when no logs were read. */
+function observedFor(f: Input): Observed {
+  const o = f.exposure.observed;
+  const paths = f.reach.paths;
+  const read = !!o && paths.length > 0 && paths.every((p) => !!p.entry.traffic);
+  if (!read || !o) return { read: false, publicOnOpen: 0, allCold: false, usable: false, stale: false, days: 0, to: '' };
+  const best = paths.find((p) => !p.entry.authenticated && p.userInput) ?? paths.find((p) => !p.entry.authenticated) ?? paths.find((p) => p.userInput) ?? paths[0]!;
+  const publicOnOpen = best.entry.authenticated ? 0 : best.entry.traffic!.public;
+  const allCold = paths.every((p) => p.entry.traffic!.requests === 0);
+  return { read, publicOnOpen, allCold, usable: !o.stale && o.days >= 14 && o.routesSeen > 0, stale: o.stale, days: o.days, to: o.to.slice(0, 10) };
+}
+
+function score(f: Input, exploitation: Exploitation, unauth: boolean, userInput: boolean, obs: Observed): number {
   const base = (f.advisory.cvssScore ?? 5) * 10;
   const reachMult: Record<string, number> = {
     reachable: 1,
@@ -125,6 +181,11 @@ function score(f: Input, exploitation: Exploitation, unauth: boolean, userInput:
   let s = base * (reachMult[f.reach.tier] ?? 0.5);
   if (f.reach.tier === 'reachable') s *= unauth ? 1 : 0.75;
   if (f.exposure.network === 'local-only') s *= 0.5;
+  if (f.reach.tier === 'reachable' && obs.read) {
+    if (obs.publicOnOpen > 0) s += 5;
+    else if (obs.allCold && obs.usable) s *= 0.7;
+  }
+  if (f.reach.tier === 'reachable' && f.exposure.reach === 'internal' && obs.publicOnOpen === 0) s *= 0.8;
   s += (f.epss?.score ?? 0) * 20;
   if (exploitation === 'active') s += 15;
   if (userInput) s += 5;

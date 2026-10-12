@@ -46,6 +46,22 @@ export function pct(n: number): string {
   return `${Math.round(n * 100)}%`;
 }
 
+/** 1200 → "1.2k", 41200 → "41k", 1500000 → "1.5M"; small numbers as they are. */
+export function compact(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+}
+
+/** One phrase for a route's observed traffic: "758 public · 12 internal in 30 d", or "no requests in 30 d". */
+export function trafficPhrase(t: { requests: number; public: number; internal: number } | undefined, days: number): string | undefined {
+  if (!t) return undefined;
+  if (!t.requests) return `no requests in ${days} d`;
+  const bits = [t.public ? `${compact(t.public)} public` : '', t.internal ? `${compact(t.internal)} internal` : ''].filter(Boolean);
+  return `${bits.join(' · ')} in ${days} d`;
+}
+
 export function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }

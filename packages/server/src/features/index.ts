@@ -15,7 +15,7 @@ import { featureRoutes, toServerRoutes } from './all.ts';
 
 export type { Role, Method, RouteUser, SettingsAccess, RouteContext, RouteResult, Route } from './core.ts';
 export { FeatureError, ROLE_RANK, roleAllows, matchPattern, findRoute, settingsFor, makeContext, dispatch } from './core.ts';
-export { featureMigrations, featureRoutes, applyFeatureMigrations, featureDb, closeFeatureDbs, toServerRoutes, exceptions, portfolio, schedule, digest } from './all.ts';
+export { featureMigrations, featureRoutes, applyFeatureMigrations, featureDb, closeFeatureDbs, toServerRoutes, exceptions, portfolio, schedule, digest, surface } from './all.ts';
 export type { ServerRoute, ServerRouteContext } from './all.ts';
 export { startScheduler } from './schedule.ts';
 

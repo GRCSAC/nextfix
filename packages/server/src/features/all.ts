@@ -5,6 +5,7 @@ import * as exceptions from './exceptions.ts';
 import * as portfolio from './portfolio.ts';
 import * as schedule from './schedule.ts';
 import * as digest from './digest.ts';
+import * as surface from './surface.ts';
 
 /*
  * The feature modules side by side: their migrations in order, their routes, and the adapter
@@ -12,14 +13,14 @@ import * as digest from './digest.ts';
  * the routes; tests import it without touching the server.
  */
 
-/** Migrations in the order they must be appended to the store's list (versions 4 to 7 after the auth schema). */
+/** Migrations in the order they must be appended to the store's list (versions 4 to 8 after the auth schema). New ones go last: the store numbers them by position. */
 export function featureMigrations(): string[] {
-  return [...exceptions.migrations, ...portfolio.migrations, ...schedule.migrations, ...digest.migrations];
+  return [...exceptions.migrations, ...portfolio.migrations, ...schedule.migrations, ...digest.migrations, ...surface.migrations];
 }
 
 /** Every feature route, in match order. */
 export function featureRoutes(): Route[] {
-  return [...exceptions.routes, ...portfolio.routes, ...schedule.routes, ...digest.routes];
+  return [...exceptions.routes, ...portfolio.routes, ...schedule.routes, ...digest.routes, ...surface.routes];
 }
 
 /**
@@ -126,4 +127,4 @@ export function toServerRoutes(routes: Route[], deps: AdapterDeps = {}): ServerR
   }));
 }
 
-export { exceptions, portfolio, schedule, digest };
+export { exceptions, portfolio, schedule, digest, surface };

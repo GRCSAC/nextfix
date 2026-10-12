@@ -1,7 +1,7 @@
 import type { Advisory, Component, Decision, Finding, ScanReport, ScanSummary } from '../../engine/src/types.ts';
 
 export type { Component, Decision, Finding, ScanReport, ScanSummary };
-export type { EntryPoint, ReachTier, ReachPath } from '../../engine/src/types.ts';
+export type { EntryPoint, ReachTier, ReachPath, RouteTraffic, TrafficSummary, TrafficFile, Exposure, InternetReach, ServiceLink, ServiceLinks } from '../../engine/src/types.ts';
 
 export interface ScanMeta {
   id: number;
@@ -21,6 +21,8 @@ export interface Target {
   lastScan?: ScanMeta;
   owner?: string | null;
   schedule?: Schedule | null;
+  /** Access logs the scan reads for this application (files or folders). */
+  accessLogs?: string[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -295,7 +297,7 @@ export const api = {
   updateException: (id: string, body: { status: 'approved' | 'rejected' | 'revoked'; reason?: string }) => call<Exception>(`/api/exceptions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   // portfolio and targets
   portfolio: (signal?: AbortSignal) => call<Portfolio>('/api/portfolio', { signal }),
-  updateTarget: (targetId: number, patch: { owner?: string | null; schedule?: Schedule | null }) => call<Target>(`/api/targets/${targetId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  updateTarget: (targetId: number, patch: { owner?: string | null; schedule?: Schedule | null; accessLogs?: string[] | null }) => call<Target>(`/api/targets/${targetId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   // digest (admin)
   digest: () => call<DigestSettings>('/api/settings/digest'),
   saveDigest: (body: DigestPatch) => call<DigestSettings>('/api/settings/digest', { method: 'PUT', body: JSON.stringify(body) }),

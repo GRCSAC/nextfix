@@ -12,6 +12,21 @@ export interface TargetRow {
   dir: string;
   name: string | null;
   createdAt: string;
+  owner: string | null;
+  schedule: { everyHours: number } | null;
+  /** Access logs the scan reads for this application (files or folders). */
+  accessLogs: string[];
+}
+
+/** targets.access_logs is a JSON list; anything else reads as none. */
+export function parseAccessLogs(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface ScanRow {
@@ -206,7 +221,7 @@ const MIGRATIONS: string[] = [
       ip TEXT
     );
   `,
-  // 4–7: exceptions, target owner and schedule, re-decide events, digest log (features/*.ts).
+  // 4–8: exceptions, target owner and schedule, re-decide events, digest log, access logs per target (features/*.ts).
   ...featureMigrations(),
 ];
 
@@ -483,23 +498,23 @@ export class Store {
   listTargets(): (TargetRow & { lastScan?: ScanRow })[] {
     const rows = this.db
       .prepare(
-        `SELECT t.id, t.dir, t.name, t.created_at,
+        `SELECT t.id, t.dir, t.name, t.created_at, t.owner, t.schedule_hours, t.access_logs,
                 s.id AS scan_id, s.created_at AS scan_created_at, s.tool_version, s.summary
          FROM targets t
          LEFT JOIN scans s ON s.id = (SELECT id FROM scans WHERE target_id = t.id ORDER BY created_at DESC, id DESC LIMIT 1)
          ORDER BY t.name, t.dir`,
       )
-      .all() as { id: number; dir: string; name: string | null; created_at: string; scan_id: number | null; scan_created_at: string | null; tool_version: string | null; summary: string | null }[];
+      .all() as { id: number; dir: string; name: string | null; created_at: string; owner: string | null; schedule_hours: number | null; access_logs: string | null; scan_id: number | null; scan_created_at: string | null; tool_version: string | null; summary: string | null }[];
     return rows.map((r) => {
-      const t: TargetRow & { lastScan?: ScanRow } = { id: r.id, dir: r.dir, name: r.name, createdAt: r.created_at };
+      const t: TargetRow & { lastScan?: ScanRow } = { id: r.id, dir: r.dir, name: r.name, createdAt: r.created_at, owner: r.owner, schedule: r.schedule_hours ? { everyHours: r.schedule_hours } : null, accessLogs: parseAccessLogs(r.access_logs) };
       if (r.scan_id !== null) t.lastScan = this.rowToScan({ id: r.scan_id, target_id: r.id, created_at: r.scan_created_at!, tool_version: r.tool_version!, summary: r.summary! });
       return t;
     });
   }
 
   getTarget(id: number): TargetRow | undefined {
-    const r = this.db.prepare('SELECT id, dir, name, created_at FROM targets WHERE id = ?').get(id) as { id: number; dir: string; name: string | null; created_at: string } | undefined;
-    return r ? { id: r.id, dir: r.dir, name: r.name, createdAt: r.created_at } : undefined;
+    const r = this.db.prepare('SELECT id, dir, name, created_at, owner, schedule_hours, access_logs FROM targets WHERE id = ?').get(id) as { id: number; dir: string; name: string | null; created_at: string; owner: string | null; schedule_hours: number | null; access_logs: string | null } | undefined;
+    return r ? { id: r.id, dir: r.dir, name: r.name, createdAt: r.created_at, owner: r.owner, schedule: r.schedule_hours ? { everyHours: r.schedule_hours } : null, accessLogs: parseAccessLogs(r.access_logs) } : undefined;
   }
 
   upsertTarget(dir: string, name?: string): TargetRow {
@@ -510,7 +525,7 @@ export class Store {
     }
     const createdAt = new Date().toISOString();
     const res = this.db.prepare('INSERT INTO targets (dir, name, created_at) VALUES (?, ?, ?)').run(dir, name ?? null, createdAt);
-    return { id: Number(res.lastInsertRowid), dir, name: name ?? null, createdAt };
+    return { id: Number(res.lastInsertRowid), dir, name: name ?? null, createdAt, owner: null, schedule: null, accessLogs: [] };
   }
 
   /** Remove a target and everything hanging off it (scans, tickets, history) in one transaction. */

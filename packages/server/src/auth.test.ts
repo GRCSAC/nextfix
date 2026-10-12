@@ -784,7 +784,7 @@ test('cli: user add reads the password from stdin and user password resets it', 
     assert.equal(await verifyPassword('recovery password 2', user.passwordHash), true);
     assert.equal(await verifyPassword('recovery password 1', user.passwordHash), false);
     assert.deepEqual(store.listAudit(10).map((r) => `${r.username}:${r.action}`), ['cli:user.password', 'cli:user.create']);
-    assert.equal(store.schemaVersion, 7);
+    assert.equal(store.schemaVersion, 8);
   } finally {
     store.close();
   }

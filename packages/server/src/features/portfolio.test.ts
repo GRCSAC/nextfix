@@ -92,12 +92,21 @@ test('PATCH /api/targets/:id: owner and schedule, validated, analyst only', asyn
     await assert.rejects(dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { owner: 'x'.repeat(201) })), (e: unknown) => e instanceof FeatureError && e.status === 400);
     const audited: unknown[] = [];
     let meta = (await dispatch(routes, 'PATCH', `/api/targets/${t.id}`, makeContext(f.db, { user: ANALYST, body: { owner: '  platform team ', schedule: { everyHours: 24 }, bogus: 1 }, audit: (a, target, d) => audited.push([a, target, d]) }))).body as TargetMeta;
-    assert.deepEqual(meta, { id: t.id, name: 'shop', dir: 'C:/x/shop', owner: 'platform team', schedule: { everyHours: 24 } });
+    assert.deepEqual(meta, { id: t.id, name: 'shop', dir: 'C:/x/shop', owner: 'platform team', schedule: { everyHours: 24 }, accessLogs: [] });
     assert.deepEqual(audited, [['target.update', `target:${t.id}`, { owner: 'platform team', schedule: { everyHours: 24 } }]]);
     // keys left out are untouched; null clears
     meta = (await dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { schedule: null }))).body as TargetMeta;
     assert.equal(meta.owner, 'platform team');
     assert.equal(meta.schedule, null);
+    // access logs: a trimmed, de-duplicated list; empty clears; shape and size are checked
+    meta = (await dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { accessLogs: [' /var/log/nginx/access.log ', 'logs', '/var/log/nginx/access.log', ''] }))).body as TargetMeta;
+    assert.deepEqual(meta.accessLogs, ['/var/log/nginx/access.log', 'logs']);
+    assert.equal(meta.owner, 'platform team', 'other fields untouched');
+    await assert.rejects(dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { accessLogs: 'logs' })), (e: unknown) => e instanceof FeatureError && e.status === 400);
+    await assert.rejects(dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { accessLogs: Array.from({ length: 21 }, (_, i) => `l${i}`) })), (e: unknown) => e instanceof FeatureError && e.status === 400);
+    await assert.rejects(dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { accessLogs: ['a\nb'] })), (e: unknown) => e instanceof FeatureError && e.status === 400);
+    meta = (await dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { accessLogs: [] }))).body as TargetMeta;
+    assert.deepEqual(meta.accessLogs, []);
     meta = (await dispatch(routes, 'PATCH', `/api/targets/${t.id}`, ctx(ANALYST, { owner: '' }))).body as TargetMeta;
     assert.equal(meta.owner, null);
     // the columns are where the migration put them

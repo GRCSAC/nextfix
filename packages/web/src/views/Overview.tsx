@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import type { Exception, ScanDiff, ScanMeta, ScanReport } from '../api.ts';
 import { TrendChart } from '../components/TrendChart.tsx';
 import { HowItWorks } from '../components/HowItWorks.tsx';
-import { BridgeChart, DecidePanel, FunnelChart, LeverageChart, MatrixChart, SurfaceTiles, VerdictCard, WorkQueue } from '../components/Panels.tsx';
+import { BridgeChart, DecidePanel, FunnelChart, LeverageChart, MatrixChart, SurfaceTiles, TrafficPanel, VerdictCard, WorkQueue } from '../components/Panels.tsx';
 import { I } from '../components/Icons.tsx';
 import { AgeingPanel, RecheckButton } from '../components/Ageing.tsx';
 import { EVIDENCE_TIERS } from '../format.ts';
-import { bridge, decide, funnel, leverageSentence, matrix, ratios, surface, upgrades, verdict } from '../analytics.ts';
+import { bridge, decide, funnel, leverageSentence, matrix, ratios, surface, trafficView, upgrades, verdict } from '../analytics.ts';
 import '../overview.css';
 
 interface Props {
@@ -36,11 +36,12 @@ export function Overview({ report, targetId, scans, diff, exceptions, accepted, 
   const ups = useMemo(() => upgrades(report), [report]);
   const tiles = useMemo(() => surface(report), [report]);
   const br = useMemo(() => bridge(report, diff), [report, diff]);
+  const tv = useMemo(() => trafficView(report), [report]);
   const s = report.summary;
 
   return (
     <div className="stack overview">
-      <VerdictCard v={v} go={go} />
+      <VerdictCard v={v} go={go} report={report} />
 
       <div className="grid ov-a">
         <section className="card">
@@ -87,10 +88,17 @@ export function Overview({ report, targetId, scans, diff, exceptions, accepted, 
           {ups.length ? <LeverageChart ups={ups.slice(0, 6)} go={go} /> : <p className="empty">No published fixes to rank yet.</p>}
         </section>
         <section className="card">
-          <div className="card-head"><div><h2>Where an attacker gets in</h2><p className="sub">Entry points sized by what they reach; colour is the worst decision behind them.</p></div></div>
-          <SurfaceTiles tiles={tiles} go={go} />
+          <div className="card-head"><div><h2>Where an attacker gets in</h2><p className="sub">Entry points sized by what they reach; colour is the worst decision behind them{tv.observed ? ', and what the logs saw on each' : ''}.</p></div></div>
+          <SurfaceTiles tiles={tiles} go={go} days={tv.days} />
         </section>
       </div>
+
+      <section className="card">
+        <div className="card-head">
+          <div className="with-icon"><span className="icon-box"><I.eye size={22} /></span><div><h2>What the logs say</h2><p className="sub">{tv.observed ? 'Requests the access logs recorded per route: exposure observed, not inferred.' : 'Observed traffic replaces inferred exposure once the access logs are read.'}</p></div></div>
+        </div>
+        <TrafficPanel v={tv} report={report} go={go} />
+      </section>
 
       <div className="grid ov-c">
         <section className="card">

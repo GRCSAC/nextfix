@@ -19,9 +19,10 @@ import { SymbolDb } from './vulns/symbols.ts';
 import { analyzeProject } from './graph/js/project.ts';
 import { assessReach } from './reach/reachability.ts';
 import { analyzeExposure } from './exposure/docker.ts';
+import { observeTraffic } from './exposure/traffic.ts';
 import { decide } from './decide/ssvc.ts';
 import { toolVersion } from './version.ts';
-import { asList, loadConfig } from './config.ts';
+import { asList, configLogProblem, loadConfig } from './config.ts';
 import { DerivedStore } from './symbols/store.ts';
 import { deriveSymbols } from './symbols/derive.ts';
 import type { Advisory, Decision, Finding, ImageInventory, ReachResult, ReachTier, ScanReport } from './types.ts';
@@ -40,6 +41,10 @@ export interface ScanOptions {
   images?: string[];
   /** SBOM files to read, in addition to `sbom` in the config and any `*.cdx.json` / `*.spdx.json` at the root. */
   sboms?: string[];
+  /** Access logs to count requests from, in addition to `accessLogs` in nextfix.config.json (files or folders; may be absolute). */
+  accessLogs?: string[];
+  /** Days of logs to count (default: the config's trafficWindowDays, else 30). */
+  trafficWindowDays?: number;
   log?: (msg: string) => void;
   /** Aborting it stops the scan at the next stage boundary (or finding) with an error whose message starts with "Scan cancelled". */
   signal?: AbortSignal;
@@ -65,6 +70,26 @@ function exploitationFor(a: Advisory, epss: Map<string, { score: number; percent
 }
 
 const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
+
+/**
+ * What the access logs say about internet reach: requests from public addresses settle it;
+ * a window of at least two weeks with internal addresses only, on logs that are current and
+ * that cover this service's routes, says the service is internal. Infrastructure files decide
+ * the rest (exposure/infra.ts), and observation outranks them.
+ */
+function applyObservedReach(exposure: ScanReport['exposure'], t: NonNullable<ScanReport['traffic']>): void {
+  const days = t.windowDays;
+  const to = (t.to ?? '').slice(0, 10);
+  if (t.public > 0) {
+    exposure.reach = 'internet';
+    exposure.reachEvidence = [`access logs: ${t.public.toLocaleString('en-US')} request${t.public === 1 ? '' : 's'} from public addresses in the ${days} days to ${to}`, ...(exposure.reachEvidence ?? [])];
+    return;
+  }
+  if (!t.stale && days >= 14 && t.routesSeen > 0 && exposure.reach !== 'internet') {
+    exposure.reach = 'internal';
+    exposure.reachEvidence = [`access logs: ${t.requests.toLocaleString('en-US')} requests in the ${days} days to ${to}, none from a public address`, ...(exposure.reachEvidence ?? [])];
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Go reachability
@@ -265,6 +290,29 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
     checkAbort();
     const exposure = analyzeExposure(rootDir, graph.listenLocalOnly);
 
+    // Observed traffic: the access logs, counted against the entry points. Config paths stay inside
+    // the project; the caller's paths (command line, application settings) may point anywhere.
+    const configLogs = asList(config.accessLogs).filter((file) => {
+      const problem = configLogProblem(rootDir, file);
+      if (problem) log(`Config: accessLogs "${file}" ignored: ${problem}`);
+      return !problem;
+    });
+    const logSources = [...new Set([...configLogs, ...(opts.accessLogs ?? [])])];
+    let traffic: ScanReport['traffic'];
+    if (logSources.length) {
+      checkAbort();
+      log(`Traffic: reading ${logSources.length} access log source${logSources.length === 1 ? '' : 's'}`);
+      const observed = await observeTraffic(rootDir, logSources, graph.entryPoints, { windowDays: opts.trafficWindowDays ?? config.trafficWindowDays, log });
+      graph.entryPoints.forEach((e, i) => {
+        e.traffic = observed.perEntry[i];
+      });
+      traffic = observed.summary;
+      if (observed.summary.requests > 0) {
+        exposure.observed = observed.observed;
+        applyObservedReach(exposure, observed.summary);
+      }
+    }
+
     let gv: GovulncheckResult | undefined;
     let goAnalysis: ScanReport['goAnalysis'];
     if (hasGo) {
@@ -400,6 +448,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       },
       exposure,
       entryPoints: graph.entryPoints,
+      traffic,
       components: inv.components,
       images,
       goAnalysis,

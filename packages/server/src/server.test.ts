@@ -263,7 +263,7 @@ test('reports written before 0.8 are normalised so every decision and tier has a
     assert.equal(scans[0]!.summary.byTier['image-only'], 0);
     const targets = (await (await f.api('/api/targets')).json()) as { lastScan: { summary: ScanReport['summary'] } }[];
     assert.equal(targets[0]!.lastScan.summary.byDecision['Track*'], 0);
-    assert.equal(f.store.schemaVersion, 7);
+    assert.equal(f.store.schemaVersion, 8);
   } finally {
     f.close();
   }
@@ -433,7 +433,7 @@ test('finding history is backfilled from stored scans when the table arrives', a
   db.close();
   const reopened = new Store(f.dbPath);
   try {
-    assert.equal(reopened.schemaVersion, 7);
+    assert.equal(reopened.schemaVersion, 8);
     assert.deepEqual(reopened.listHistory(target.id), before, 'walking the scans oldest to newest rebuilds the same rows');
   } finally {
     reopened.close();

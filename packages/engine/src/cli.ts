@@ -16,7 +16,7 @@ import type { Advisory, Decision } from './types.ts';
 const HELP = `NextFix ${toolVersion()} — tells you what to fix next, and why.
 
 Usage:
-  nextfix scan <dir> [--image <ref>] [--sbom <file>] [--json <file>] [--vex <file>] [--sarif <file>] [--fail-on D] [--offline] [--no-derive] [--why N] [--quiet]
+  nextfix scan <dir> [--image <ref>] [--sbom <file>] [--access-log <file>] [--json <file>] [--vex <file>] [--sarif <file>] [--fail-on D] [--offline] [--no-derive] [--why N] [--quiet]
   nextfix symbols derive <advisory-id> <package> [--pypi] [--force]   Derive vulnerable functions from the fix commit
   nextfix symbols list                                        Show derived entries on this machine
   nextfix symbols confirm <advisory-id> <package>             Promote a derived entry after review
@@ -27,6 +27,9 @@ Usage:
 Options:
   --image <ref>   Also inventory this container image with syft (repeatable; or "image" in nextfix.config.json).
   --sbom <file>   Also read this CycloneDX / SPDX / Grype JSON (repeatable; *.cdx.json and *.spdx.json at the root are read anyway).
+  --access-log <file>  Count requests from this access log or folder of logs (repeatable; or "accessLogs" in
+                  nextfix.config.json). nginx/Apache combined, AWS ALB and JSON lines are read; the last 30 days
+                  (--traffic-days N) are counted per route, and routes nobody called are said so.
   --json <file>   Write the full report as JSON.
   --vex <file>    Write an OpenVEX document (one statement per finding).
   --sarif <file>  Write SARIF 2.1.0 for GitHub code scanning and other SARIF viewers (one rule per advisory,
@@ -53,6 +56,8 @@ async function main() {
       sarif: { type: 'string' },
       image: { type: 'string', multiple: true },
       sbom: { type: 'string', multiple: true },
+      'access-log': { type: 'string', multiple: true },
+      'traffic-days': { type: 'string' },
       offline: { type: 'boolean', default: false },
       'no-derive': { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
@@ -87,7 +92,13 @@ async function main() {
     return;
   }
 
-  const report = await scan(dir, { offline: values.offline, derive: !values['no-derive'], images: values.image, sboms: values.sbom, log });
+  const trafficDays = values['traffic-days'] !== undefined ? parseInt(values['traffic-days'], 10) : undefined;
+  if (trafficDays !== undefined && !(Number.isInteger(trafficDays) && trafficDays >= 1 && trafficDays <= 365)) {
+    console.error('nextfix: --traffic-days must be a whole number of days from 1 to 365');
+    process.exitCode = 2;
+    return;
+  }
+  const report = await scan(dir, { offline: values.offline, derive: !values['no-derive'], images: values.image, sboms: values.sbom, accessLogs: values['access-log'], trafficWindowDays: trafficDays, log });
 
   if (values.json) writeOut(values.json, JSON.stringify(report, null, 2));
   if (values.vex) writeOut(values.vex, JSON.stringify(toOpenVex(report), null, 2));

@@ -22,6 +22,8 @@ export function HowItWorks({ onClose }: { onClose: () => void }) {
       <ul className="plain">
         <li><strong>Exploitation:</strong> CISA KEV membership (active) and FIRST EPSS ≥ 10% (likely).</li>
         <li><strong>Exposure:</strong> Dockerfile <code>EXPOSE</code>, compose <code>ports:</code>, and whether the app binds to loopback.</li>
+        <li><strong>Observed traffic:</strong> with access logs configured, requests per route over the last 30 days, split by public and internal addresses. Public traffic on an open route lifts a moderate finding to Act; a route nobody called holds a severity-only Act at Attend; both say so in the why.</li>
+        <li><strong>Internet reach:</strong> public addresses in the logs, a declaration in <code>nextfix.config.json</code>, or infrastructure files (Terraform, CloudFormation, Kubernetes, compose bindings). An internal-only service holds a severity-only Act at Attend.</li>
         <li><strong>Request data:</strong> arguments that mention <code>req.*</code>, followed down the call chain.</li>
         <li><strong>Score:</strong> CVSS × reachability × exposure, plus EPSS and KEV. It orders findings; it never changes a decision.</li>
       </ul>

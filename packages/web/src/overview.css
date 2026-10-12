@@ -122,3 +122,45 @@
   .grid { grid-template-columns: 1fr !important; }
   .stack { gap: 10px; }
 }
+
+/* ---------- internet reach under the verdict ---------- */
+.verdict-reach { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.86rem; margin: 0 0 8px; --r: var(--muted); }
+.verdict-reach.r-act { --r: var(--c-act); } .verdict-reach.r-good { --r: var(--c-good); }
+.reach-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--r); flex: none; }
+.verdict-reach strong { color: var(--ink); }
+
+/* ---------- observed traffic ---------- */
+.tile-traffic.seen { color: var(--c-act-text); font-weight: 600; }
+.tile-traffic.internal { color: var(--c-watch); }
+.tile-traffic.quiet { color: var(--muted); }
+.tile.quiet { opacity: 0.85; border-style: dashed; }
+.traffic-empty { display: grid; gap: 8px; max-width: 760px; }
+.traffic-empty p { margin: 0; line-height: 1.5; }
+.traffic-sentence { font-weight: 600; margin: 0 0 4px; }
+.traffic-rows { display: grid; gap: 4px; margin-top: 10px; }
+.traffic-row { display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(140px, 1.2fr) minmax(120px, auto); gap: 10px; align-items: center; background: none; border: 0; padding: 4px 0; cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: 6px; }
+.traffic-row:hover { background: var(--surface-2); }
+.traffic-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.traffic-route { font-size: 0.86rem; min-width: 0; overflow-wrap: anywhere; }
+.traffic-bar { display: flex; align-items: center; gap: 2px; height: 16px; min-width: 0; }
+.traffic-seg { display: inline-block; height: 100%; border-radius: 3px; min-width: 3px; }
+.traffic-seg.public { background: var(--c-act); }
+.traffic-seg.internal { background: var(--seq-3); }
+.traffic-legend .traffic-seg { height: 10px; width: 14px; vertical-align: middle; margin-right: 4px; }
+.traffic-n { font-weight: 700; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.traffic-note { font-size: 0.82rem; }
+.traffic-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
+.traffic-quiet { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--grid); }
+.traffic-quiet h3 { font-size: 0.92rem; margin: 0 0 6px; }
+.traffic-files { margin: 12px 0 0; overflow-wrap: anywhere; }
+.tri.d-act { color: var(--c-act); } .tri.d-attend { color: var(--c-attend); } .tri.d-watch { color: var(--c-watch); } .tri.d-aside { color: var(--c-aside); } .tri.d-good { color: var(--c-good); }
+@media (max-width: 640px) { .traffic-row { grid-template-columns: 1fr; gap: 3px; padding-bottom: 6px; border-bottom: 1px solid var(--grid); } }
+
+/* ---------- observed traffic on the findings page ---------- */
+.traffic-tag { font-family: var(--sans); font-size: 0.74rem; font-weight: 600; white-space: nowrap; }
+.traffic-tag.public { color: var(--c-act-text); }
+.traffic-tag.internal { color: var(--c-watch); }
+.traffic-tag.cold { color: var(--muted); font-weight: 500; }
+.tbl.mini { font-size: 0.84rem; }
+.tbl.mini th, .tbl.mini td { padding: 4px 8px; }
+.traffic-public { color: var(--c-act-text); font-weight: 600; }

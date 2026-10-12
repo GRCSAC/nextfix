@@ -1,6 +1,6 @@
 import type { Decision, ScanReport } from '../api.ts';
-import { DECISIONS, DECISION_META, advisoryName, dateTime, pct } from '../format.ts';
-import { MATRIX_COLS, MATRIX_ROWS, cellLabel, type Bridge, type Decide, type FunnelRow, type MatrixCell, type SurfaceTile, type Upgrade, type Verdict } from '../analytics.ts';
+import { DECISIONS, DECISION_META, advisoryName, compact, dateTime, pct, shortDate, trafficPhrase } from '../format.ts';
+import { MATRIX_COLS, MATRIX_ROWS, cellLabel, type Bridge, type Decide, type FunnelRow, type MatrixCell, type SurfaceTile, type TrafficView, type Upgrade, type Verdict } from '../analytics.ts';
 import { KIND_META } from '../exceptions.ts';
 import { I } from './Icons.tsx';
 
@@ -9,8 +9,30 @@ type Go = (page: string, id?: string, query?: Record<string, string>) => void;
 const POSTURE_CLASS: Record<Verdict['posture'], string> = { Exposed: 'act', Attention: 'attend', Contained: 'watch', Clean: 'good' };
 const POSTURE_ICON: Record<Verdict['posture'], string> = { Exposed: '▲', Attention: '●', Contained: '◐', Clean: '✓' };
 
+const REACH_META = {
+  internet: { label: 'Internet-facing', cls: 'act' },
+  internal: { label: 'Not reachable from the internet', cls: 'good' },
+  unknown: { label: 'Internet reach not confirmed', cls: 'muted' },
+} as const;
+
+/** The exposure line under the verdict: how far the service is from the internet, and what said so. */
+export function ReachLine({ report, go }: { report: ScanReport; go: Go }) {
+  const x = report.exposure;
+  const reach = x.reach ?? 'unknown';
+  const m = REACH_META[reach];
+  const evidence = reach === 'unknown' ? (x.network === 'published' ? `network-published (${x.evidence.join('; ')}), but nothing says whether the internet reaches it` : x.network === 'local-only' ? 'binds to loopback only' : 'no access logs, infrastructure files or declaration found') : (x.reachEvidence ?? []).join('; ');
+  return (
+    <p className={`verdict-reach r-${m.cls}`}>
+      <span className="reach-dot" aria-hidden="true" />
+      <strong>{m.label}</strong>
+      {evidence && <span className="muted"> · {evidence}</span>}
+      {reach === 'unknown' && <> · <button type="button" className="link" onClick={() => go('apps')}>add access logs</button></>}
+    </p>
+  );
+}
+
 /** One state, one sentence, and the rule that produced it. */
-export function VerdictCard({ v, go }: { v: Verdict; go: Go }) {
+export function VerdictCard({ v, go, report }: { v: Verdict; go: Go; report?: ScanReport }) {
   return (
     <section className={`card verdict p-${POSTURE_CLASS[v.posture]}`} aria-label="Posture">
       <div className="verdict-state">
@@ -23,6 +45,7 @@ export function VerdictCard({ v, go }: { v: Verdict; go: Go }) {
         {v.detail && (
           v.findingId ? <button type="button" className="verdict-detail link" onClick={() => go('findings', v.findingId)}>{v.detail} <I.arrow /></button> : <p className="verdict-detail">{v.detail}</p>
         )}
+        {report && <ReachLine report={report} go={go} />}
         <p className="verdict-rule">{v.rule}</p>
       </div>
     </section>
@@ -43,7 +66,7 @@ export function FunnelChart({ rows, go }: { rows: FunnelRow[]; go: Go }) {
           </span>
           <span className="funnel-note" role="cell">
             {r.removed && r.removed.count > 0 ? (
-              r.removed.tier ? <button type="button" className="link" onClick={() => go('findings', undefined, { tier: r.removed!.tier! })}>{r.removed.note}</button> : r.removed.note
+              r.removed.tier ? <button type="button" className="link" onClick={() => go('findings', undefined, { tier: r.removed!.tier!, ...(r.removed!.query ?? {}) })}>{r.removed.note}</button> : r.removed.note
             ) : r.removed ? <span className="muted">none removed</span> : <span className="muted">what a scanner reports</span>}
           </span>
         </div>
@@ -156,18 +179,21 @@ function ChangeList({ title, items, go }: { title: string; items: { id?: string;
 }
 
 /** Entry points as tiles sized by what they reach; clean ones collapse into a count. */
-export function SurfaceTiles({ tiles, go }: { tiles: SurfaceTile[]; go: Go }) {
+export function SurfaceTiles({ tiles, go, days = 30 }: { tiles: SurfaceTile[]; go: Go; days?: number }) {
   const hot = tiles.filter((t) => t.findings.length);
   const clean = tiles.filter((t) => !t.findings.length);
   const cleanOpen = clean.filter((t) => !t.entry.authenticated).length;
+  const cleanCalled = clean.filter((t) => (t.traffic?.requests ?? 0) > 0).length;
+  const observed = tiles.some((t) => t.traffic);
   const size = (n: number) => (n >= 3 ? 'big' : n === 2 ? 'mid' : 'small');
   return (
     <div className="surface">
       {hot.map((t) => (
-        <button key={`${t.entry.method} ${t.entry.path} ${t.entry.file}:${t.entry.line}`} type="button" className={`tile ${size(t.findings.length)} d-${t.worst ? DECISION_META[t.worst].cls : 'good'}`} onClick={() => go('findings', undefined, { q: t.entry.path })}>
+        <button key={`${t.entry.method} ${t.entry.path} ${t.entry.file}:${t.entry.line}`} type="button" className={`tile ${size(t.findings.length)} d-${t.worst ? DECISION_META[t.worst].cls : 'good'}${t.traffic && !t.traffic.requests ? ' quiet' : ''}`} onClick={() => go('findings', undefined, { q: t.entry.path })}>
           <span className="tile-route mono">{t.entry.method} {t.entry.path}</span>
           <span className="tile-line">{t.entry.authenticated ? 'behind a login' : 'open'} · {t.findings.length} finding{t.findings.length === 1 ? '' : 's'}{t.worst ? ` · ${DECISION_META[t.worst].short}` : ''}</span>
           {t.userInput && <span className="tile-line">request data reaches a vulnerable call</span>}
+          {t.traffic && <span className={`tile-line tile-traffic ${t.traffic.public ? 'seen' : t.traffic.requests ? 'internal' : 'quiet'}`}>{t.traffic.public ? '● ' : t.traffic.requests ? '◐ ' : '○ '}{trafficPhrase(t.traffic, days)}</span>}
           <span className="tile-foot small">{[...new Set(t.findings.map((f) => f.component.name))].slice(0, 3).join(', ')}</span>
         </button>
       ))}
@@ -175,10 +201,62 @@ export function SurfaceTiles({ tiles, go }: { tiles: SurfaceTile[]; go: Go }) {
         <div className="tile clean small">
           <span className="tile-route">{clean.length} clean route{clean.length === 1 ? '' : 's'}</span>
           <span className="tile-line">{cleanOpen} open, {clean.length - cleanOpen} behind a login</span>
-          <span className="tile-foot small">no vulnerable call reachable</span>
+          <span className="tile-foot small">no vulnerable call reachable{observed ? ` · ${cleanCalled} called in ${days} d` : ''}</span>
         </div>
       )}
       {!tiles.length && <p className="empty">No HTTP entry points were found in this project.</p>}
+    </div>
+  );
+}
+
+/**
+ * What the access logs say: the window, the busiest routes split public/internal with the worst
+ * decision behind each, the open routes nobody called, and the files that were read.
+ */
+export function TrafficPanel({ v, report, go }: { v: TrafficView; report: ScanReport; go: Go }) {
+  if (!v.configured) {
+    return (
+      <div className="traffic-empty">
+        <p>No access logs yet. Today the exposure column is <strong>inferred</strong> from Dockerfile, compose and the code's auth guards.</p>
+        <p>Point NextFix at the proxy or load-balancer logs it already has and the column becomes <strong>observed</strong>: routes the internet is actually calling rise, routes nobody has called in a month fall, and every finding says how many requests reached it. Nothing is installed; the logs are read on this machine and only the counts are kept.</p>
+        <div className="actions"><button type="button" className="btn small" onClick={() => go('apps')}><I.list /> Add access logs</button></div>
+      </div>
+    );
+  }
+  if (!v.observed) return <div className="traffic-empty"><p>{v.sentence}</p><p className="muted small">{v.detail}</p><p className="hint">Supported: nginx and Apache combined logs, AWS ALB logs, JSON lines (Caddy, Cloudflare Logpush, Traefik, pino). Compressed rotations are skipped.</p></div>;
+  const top = v.routes.slice(0, 8);
+  const max = Math.max(1, ...top.map((r) => r.traffic.requests));
+  return (
+    <div className="traffic">
+      <p className="traffic-sentence">{v.sentence}</p>
+      {v.detail && <p className="muted small">{v.detail}</p>}
+      <div className="traffic-rows" role="table" aria-label="Routes by observed requests">
+        {top.map((r) => (
+          <button key={`${r.entry.method} ${r.entry.path}`} type="button" className="traffic-row" role="row" onClick={() => go('findings', undefined, { q: r.entry.path })}>
+            <span className="traffic-route mono" role="cell"><span className={`tri d-${r.worst ? DECISION_META[r.worst].cls : 'good'}`} aria-hidden="true">{r.worst ? DECISION_META[r.worst].icon : '✓'}</span> {r.entry.method} {r.entry.path}{r.entry.authenticated ? <span className="muted"> · login</span> : null}</span>
+            <span className="traffic-bar" role="cell" aria-label={`${r.traffic.requests} requests, ${r.traffic.public} public`}>
+              {r.traffic.public > 0 && <span className="traffic-seg public" style={{ width: `${(r.traffic.public / max) * 100}%` }} />}
+              {r.traffic.internal > 0 && <span className="traffic-seg internal" style={{ width: `${(r.traffic.internal / max) * 100}%` }} />}
+              <span className="traffic-n">{compact(r.traffic.requests)}</span>
+            </span>
+            <span className="traffic-note muted" role="cell">{r.traffic.public ? `${compact(r.traffic.public)} public` : 'internal only'}{r.findings.length ? ` · ${r.findings.length} finding${r.findings.length === 1 ? '' : 's'}` : ' · clean'}</span>
+          </button>
+        ))}
+      </div>
+      <div className="traffic-legend muted small"><span><i className="traffic-seg public" /> public addresses</span><span><i className="traffic-seg internal" /> internal addresses</span>{v.routes.length > top.length && <span>{v.routes.length - top.length} more routes took requests</span>}</div>
+      {v.quiet.length > 0 && (
+        <div className="traffic-quiet">
+          <h3>Open routes nobody called{v.stale ? '' : ', still reaching vulnerable code'}</h3>
+          <ul className="plain">
+            {v.quiet.slice(0, 6).map((r) => (
+              <li key={`${r.entry.method} ${r.entry.path}`}><button type="button" className="link mono" onClick={() => go('findings', undefined, { q: r.entry.path })}>{r.entry.method} {r.entry.path}</button> <span className="muted small">{r.findings.length} finding{r.findings.length === 1 ? '' : 's'}{r.worst ? ` · ${DECISION_META[r.worst].short}` : ''}</span></li>
+            ))}
+            {v.quiet.length > 6 && <li className="muted small">and {v.quiet.length - 6} more</li>}
+          </ul>
+          <p className="hint">{v.stale ? 'The logs are stale, so these are reported without lowering a decision.' : 'A severity-only Fix now on one of these is held at Fix next cycle until a request arrives or exploit data changes; the finding says so.'}</p>
+        </div>
+      )}
+      <p className="traffic-files muted small">Read: {v.files.map((f) => `${f.path} (${f.format}${f.lines ? `, ${compact(f.lines)} lines, ${compact(f.matched)} on known routes` : ''})`).join(' · ')}{report.traffic?.to ? ` · newest line ${shortDate(report.traffic.to)}` : ''}</p>
     </div>
   );
 }

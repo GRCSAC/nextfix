@@ -55,7 +55,7 @@ export function Apps({ targets, currentId, busy, role, onSelect, onAdd, onRemove
                 <span className="grow">
                   <span className="pkg">{t.name ?? t.dir}</span>
                   <div className="small muted mono">{t.dir}</div>
-                  <div className="small muted app-meta"><span><I.user size={13} /> {t.owner || 'unassigned'}</span><span><I.clock size={13} /> {scheduleLabel(t.schedule)}</span></div>
+                  <div className="small muted app-meta"><span><I.user size={13} /> {t.owner || 'unassigned'}</span><span><I.clock size={13} /> {scheduleLabel(t.schedule)}</span><span><I.list size={13} /> {t.accessLogs?.length ? `${t.accessLogs.length} access log${t.accessLogs.length === 1 ? '' : 's'}` : 'no access logs'}</span></div>
                 </span>
                 <span className="muted small app-last">{t.lastScan ? `${t.lastScan.summary.findings} findings · ${t.lastScan.summary.byDecision.Act} fix now · ${dateTime(t.lastScan.createdAt)}` : 'never scanned'}</span>
               </button>
@@ -66,7 +66,7 @@ export function Apps({ targets, currentId, busy, role, onSelect, onAdd, onRemove
                 </span>
               ) : (
                 <span className="app-actions">
-                  <button type="button" className="btn ghost icon" aria-label={`Edit owner and schedule for ${t.name ?? t.dir}`} title={canEdit ? 'Owner and scan schedule' : 'Viewers cannot change the owner or schedule'} disabled={!canEdit} onClick={() => setEditing(t)}><I.edit /></button>
+                  <button type="button" className="btn ghost icon" aria-label={`Edit owner, schedule and access logs for ${t.name ?? t.dir}`} title={canEdit ? 'Owner, scan schedule and access logs' : 'Viewers cannot change the owner, schedule or access logs'} disabled={!canEdit} onClick={() => setEditing(t)}><I.edit /></button>
                   <button type="button" className="btn ghost icon" aria-label={`Remove ${t.name ?? t.dir}`} title={canRemove ? 'Remove the application and its history' : 'Only an administrator can remove an application'} disabled={!canRemove} onClick={() => setConfirm(t.id)}><I.trash /></button>
                 </span>
               )}
@@ -83,6 +83,7 @@ export function Apps({ targets, currentId, busy, role, onSelect, onAdd, onRemove
 function EditTargetModal({ t, onClose, onSaved }: { t: Target; onClose: () => void; onSaved: (t: Target) => void }) {
   const [owner, setOwner] = useState(t.owner ?? '');
   const [hours, setHours] = useState<number | null>(t.schedule?.everyHours ?? null);
+  const [logs, setLogs] = useState((t.accessLogs ?? []).join('\n'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: React.FormEvent) => {
@@ -90,7 +91,8 @@ function EditTargetModal({ t, onClose, onSaved }: { t: Target; onClose: () => vo
     setBusy(true);
     setError(null);
     try {
-      onSaved(await api.updateTarget(t.id, { owner: owner.trim() || null, schedule: hours ? { everyHours: hours } : null }));
+      const accessLogs = logs.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      onSaved(await api.updateTarget(t.id, { owner: owner.trim() || null, schedule: hours ? { everyHours: hours } : null, accessLogs: accessLogs.length ? accessLogs : null }));
     } catch (err) {
       setError(message(err));
     } finally {
@@ -102,6 +104,7 @@ function EditTargetModal({ t, onClose, onSaved }: { t: Target; onClose: () => vo
       <form className="auth-form" onSubmit={submit} noValidate>
         <label className="field"><span>Owner</span><input type="text" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="Team or person who fixes it" autoFocus autoComplete="off" /><span className="hint">Shown in the portfolio and the weekly digest.</span></label>
         <label className="field"><span>Scan schedule</span><select value={hours ?? ''} onChange={(e) => setHours(e.target.value ? Number(e.target.value) : null)}>{SCHEDULES.map((s) => <option key={String(s.hours)} value={s.hours ?? ''}>{s.label}</option>)}</select><span className="hint">The server scans on this cadence while it runs; Scan again still works any time.</span></label>
+        <label className="field"><span>Access logs</span><textarea value={logs} onChange={(e) => setLogs(e.target.value)} rows={3} placeholder={'/var/log/nginx/access.log\nC:\\logs\\alb'} spellCheck={false} /><span className="hint">One file or folder per line, on the machine NextFix runs on: nginx or Apache combined logs, AWS ALB logs, or JSON lines (Caddy, Cloudflare, Traefik, pino). The next scan counts the last 30 days of requests per route, so exposure is observed rather than inferred.</span></label>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
           <button type="submit" className="btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>

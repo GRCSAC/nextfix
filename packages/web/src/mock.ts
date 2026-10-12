@@ -79,11 +79,25 @@ interface Tpl {
   symbol?: string; firstSeenDays: number;
 }
 
-const EXPOSURE_PUBLISHED = { network: 'published' as const, ports: [3000], evidence: ['Dockerfile: EXPOSE 3000', 'docker-compose.yml: publishes port 3000'] };
+const EXPOSURE_PUBLISHED: ScanReport['exposure'] = { network: 'published', ports: [3000], evidence: ['Dockerfile: EXPOSE 3000', 'docker-compose.yml: publishes port 3000'] };
+/** The shop's logs: 30 days of nginx access logs, read by the scan. */
+const SHOP_TRAFFIC: Record<string, EntryPoint['traffic']> = {
+  'POST /preview': { requests: 41_230, public: 39_880, internal: 1350, firstSeenAt: daysAgo(30), lastSeenAt: daysAgo(0) },
+  'POST /login': { requests: 12_410, public: 12_300, internal: 110, firstSeenAt: daysAgo(30), lastSeenAt: daysAgo(0) },
+  'GET /go': { requests: 0, public: 0, internal: 0 },
+  'POST /admin/upload': { requests: 36, public: 0, internal: 36, firstSeenAt: daysAgo(22), lastSeenAt: daysAgo(2) },
+  'GET /orders': { requests: 2840, public: 2790, internal: 50, firstSeenAt: daysAgo(30), lastSeenAt: daysAgo(0) },
+};
+const SHOP_TRAFFIC_SUMMARY: ScanReport['traffic'] = {
+  files: [{ path: '/var/log/nginx/access.log', format: 'combined', lines: 61_204, parsed: 61_180, matched: 56_516 }, { path: '/var/log/nginx/access.log.1', format: 'combined', lines: 58_911, parsed: 58_900, matched: 54_120 }],
+  windowDays: 30, from: daysAgo(30), to: daysAgo(0), requests: 61_180, public: 59_460, internal: 1720, unmatched: 4664, routesSeen: 4, routesCold: 1, stale: false,
+};
+const SHOP_EXPOSURE: ScanReport['exposure'] = { ...EXPOSURE_PUBLISHED, reach: 'internet', reachEvidence: ['access logs: 59,460 requests from public addresses in the 30 days to today', 'infra/alb.tf: aws_lb "shop" is internet-facing on :443'], observed: { public: 59_460, internal: 1720, days: 30, to: daysAgo(0), stale: false, routesSeen: 4 } };
 const EXPOSURE_UNKNOWN = { network: 'unknown' as const, ports: [], evidence: [] };
 
-function entryPoint(e: NonNullable<Tpl['entry']>): EntryPoint {
-  return { method: e.method, path: e.path, file: e.file, line: e.line, authenticated: e.auth, guards: e.auth ? ['requireAuth'] : [], mounted: true, handlerIds: [`${e.file}#<handler>@${e.line}:12`] };
+function entryPoint(e: NonNullable<Tpl['entry']>, exposure?: ScanReport['exposure']): EntryPoint {
+  const traffic = exposure?.observed ? SHOP_TRAFFIC[`${e.method} ${e.path}`] ?? { requests: 0, public: 0, internal: 0 } : undefined;
+  return { method: e.method, path: e.path, file: e.file, line: e.line, authenticated: e.auth, guards: e.auth ? ['requireAuth'] : [], mounted: true, handlerIds: [`${e.file}#<handler>@${e.line}:12`], ...(traffic ? { traffic } : {}) };
 }
 
 function finding(t: Tpl, exposure: ScanReport['exposure']): Finding {
@@ -92,7 +106,7 @@ function finding(t: Tpl, exposure: ScanReport['exposure']): Finding {
   const symbol = t.symbol ?? 'parse';
   const callSite = { file: `src/services/${t.name}.js`, line: 14, col: 9, text: `${t.name}.${symbol}`, symbol, userInput: !!t.entry?.input };
   const paths = t.entry ? [{
-    entry: entryPoint(t.entry),
+    entry: entryPoint(t.entry, exposure),
     hops: [{ functionId: `${t.entry.file}#<handler>@${t.entry.line}:12`, name: '<handler>', file: t.entry.file, line: t.entry.line }, { functionId: `src/services/${t.name}.js#handle@12:1`, name: 'handle', file: `src/services/${t.name}.js`, line: 12 }],
     callSite,
     userInput: t.entry.input,
@@ -110,7 +124,9 @@ function finding(t: Tpl, exposure: ScanReport['exposure']): Finding {
     t.entry?.input ? `User-controlled request data enters the chain in <handler> (${t.entry.file}:${t.entry.line}) and is passed down to the vulnerable call.` : '',
     t.entry ? (t.entry.auth ? `The entry point ${t.entry.method} ${t.entry.path} is behind requireAuth.` : `The entry point ${t.entry.method} ${t.entry.path} has no auth guard.`) : '',
     t.kev ? `${t.cve} is on CISA's Known Exploited Vulnerabilities list.` : t.epss !== undefined ? `EPSS puts the chance of exploitation in the next 30 days at ${Math.round(t.epss * 100)}%.` : '',
+    t.entry && exposure.observed ? (() => { const tr = SHOP_TRAFFIC[`${t.entry.method} ${t.entry.path}`]; return tr?.requests ? `Observed: ${t.entry.method} ${t.entry.path} received ${tr.requests.toLocaleString('en-US')} requests in the 30 days to today, ${tr.public.toLocaleString('en-US')} from public addresses${t.entry.auth ? ' (behind a login)' : ''}.` : `Observed: no request reached ${t.entry.method} ${t.entry.path} in the 30 days of logs to today.`; })() : '',
     exposure.network === 'published' ? `Service is network-published: ${exposure.evidence.join('; ')}.` : 'Network exposure could not be determined from the project files.',
+    exposure.reach === 'internet' ? `Internet-facing: ${(exposure.reachEvidence ?? []).join('; ')}.` : '',
   ].filter(Boolean);
   return {
     id: `${purl}|${t.id}`,
@@ -177,10 +193,11 @@ let nextScanId = 100;
 function buildScans(targetId: number, name: string, dir: string, templates: Tpl[], exposure: ScanReport['exposure'], history: number[], spacingDays: number, lastHoursAgo = 0): { meta: ScanMeta; report: ScanReport }[] {
   const out: { meta: ScanMeta; report: ScanReport }[] = [];
   const all = templates.map((t) => finding(t, exposure));
-  const entries = templates.filter((t) => t.entry).map((t) => entryPoint(t.entry!));
+  const entries = templates.filter((t) => t.entry).map((t) => entryPoint(t.entry!, exposure));
+  const quiet = exposure.observed ? { traffic: { requests: 0, public: 0, internal: 0 } } : {};
   const extraEntries: EntryPoint[] = [
-    { method: 'GET', path: '/healthz', file: 'src/app.js', line: 23, authenticated: false, guards: [], mounted: true, handlerIds: ['src/app.js#<handler>@23:21'] },
-    { method: 'GET', path: '/account', file: 'src/app.js', line: 40, authenticated: true, guards: ['requireAuth'], mounted: true, handlerIds: ['src/app.js#<handler>@40:21'] },
+    { method: 'GET', path: '/healthz', file: 'src/app.js', line: 23, authenticated: false, guards: [], mounted: true, handlerIds: ['src/app.js#<handler>@23:21'], ...(exposure.observed ? { traffic: { requests: 8640, public: 0, internal: 8640, firstSeenAt: daysAgo(30), lastSeenAt: daysAgo(0) } } : {}) },
+    { method: 'GET', path: '/account', file: 'src/app.js', line: 40, authenticated: true, guards: ['requireAuth'], mounted: true, handlerIds: ['src/app.js#<handler>@40:21'], ...quiet },
   ];
   const components = [...all.map((f) => f.component), ...cleanComponents(name.slice(0, 4), 40)];
   history.forEach((actionable, i) => {
@@ -194,7 +211,7 @@ function buildScans(targetId: number, name: string, dir: string, templates: Tpl[
       findings = [...act.slice(0, actionable), ...rest];
       if (actionable > act.length) findings = [...findings, ...rest.slice(0, actionable - act.length).map((f) => ({ ...f, decision: 'Attend' as Decision }))];
     }
-    const report: ScanReport = { tool: { name: 'NextFix', version: VERSION }, target: { dir, name, version: '1.4.0' }, generatedAt: at, summary: summarize(findings, components.length), exposure, entryPoints: [...entries, ...extraEntries], components, findings };
+    const report: ScanReport = { tool: { name: 'NextFix', version: VERSION }, target: { dir, name, version: '1.4.0' }, generatedAt: at, summary: summarize(findings, components.length), exposure, entryPoints: [...entries, ...extraEntries], ...(exposure.observed && scansFromEnd === 0 ? { traffic: SHOP_TRAFFIC_SUMMARY } : {}), components, findings };
     const meta: ScanMeta = { id: nextScanId++, targetId, createdAt: at, toolVersion: VERSION, summary: report.summary };
     out.push({ meta, report });
   });
@@ -209,7 +226,7 @@ function addMockTarget(id: number, name: string, dir: string, owner: string | nu
   for (const t of templates) firstSeen[`pkg:npm/${t.name}@${t.version}|${t.id}`] = daysAgo(t.firstSeenDays);
   targets.push({ target: { id, dir, name, createdAt: daysAgo(130), lastScan: last?.meta, owner, schedule }, templates, exposure, scans, firstSeen });
 }
-addMockTarget(1, 'shop-api', 'C:\\src\\shop-api', 'Priya Raman', { everyHours: 24 }, SHOP, EXPOSURE_PUBLISHED, [3, 4, 4, 6, 5, 5, 4, 5], 7, 3);
+addMockTarget(1, 'shop-api', 'C:\\src\\shop-api', 'Priya Raman', { everyHours: 24 }, SHOP, SHOP_EXPOSURE, [3, 4, 4, 6, 5, 5, 4, 5], 7, 3);
 addMockTarget(2, 'billing-worker', 'C:\\src\\billing-worker', 'Jordan Lee', { everyHours: 168 }, BILLING, EXPOSURE_UNKNOWN, [1, 2, 2], 14, 31);
 addMockTarget(3, 'partner-portal', 'C:\\src\\partner-portal', null, null, PORTAL, EXPOSURE_PUBLISHED, [2, 1, 0, 0], 10, 6 * 24);
 addMockTarget(4, 'marketing-site', 'C:\\src\\marketing-site', 'Tom Okafor', null, [], EXPOSURE_UNKNOWN, [], 0);

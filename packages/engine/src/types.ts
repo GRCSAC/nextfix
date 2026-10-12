@@ -126,6 +126,16 @@ export type ReachTier =
 
 export type ReachConfidence = SymbolConfidence | 'package-level';
 
+/** Requests an access log recorded against one route inside the observation window. */
+export interface RouteTraffic {
+  requests: number;
+  /** Requests from addresses outside private, loopback and link-local ranges. */
+  public: number;
+  internal: number;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+}
+
 export interface EntryPoint {
   method: string;
   path: string;
@@ -138,6 +148,8 @@ export interface EntryPoint {
   handlerIds: string[];
   /** Handlers NextFix could not follow into code (factories like `login()`, methods on unknown objects). */
   unresolvedHandlers?: string[];
+  /** What the access logs recorded for this route (present on every entry point when logs were read). */
+  traffic?: RouteTraffic;
 }
 
 export interface PathHop {
@@ -180,10 +192,81 @@ export interface ReachResult {
 
 export type NetworkExposure = 'published' | 'local-only' | 'unknown';
 
+/** Whether the service can be reached from the internet: observed in traffic, declared, or read from infrastructure files. */
+export type InternetReach = 'internet' | 'internal' | 'unknown';
+
+export interface ObservedTraffic {
+  /** Requests inside the window, from public and from internal addresses. */
+  public: number;
+  internal: number;
+  /** Days the window covers and the day it ends; `stale` when the logs end long before the scan. */
+  days: number;
+  to: string;
+  stale: boolean;
+  /** Entry points that received at least one request; 0 means the logs are probably for another service. */
+  routesSeen: number;
+}
+
 export interface Exposure {
   network: NetworkExposure;
   ports: number[];
   evidence: string[];
+  /** Internet reach and the file or observation lines that decided it (absent in reports before 1.1). */
+  reach?: InternetReach;
+  reachEvidence?: string[];
+  /** Traffic the access logs recorded for the whole service (absent when no logs were read). */
+  observed?: ObservedTraffic;
+}
+
+/** One file of access logs as it was read. */
+export interface TrafficFile {
+  path: string;
+  /** Detected line format: combined, json, alb, or unknown. */
+  format: string;
+  lines: number;
+  parsed: number;
+  /** Requests whose path matched an entry point. */
+  matched: number;
+}
+
+/** What the access logs said about the whole service. */
+export interface TrafficSummary {
+  files: TrafficFile[];
+  windowDays: number;
+  from?: string;
+  to?: string;
+  /** Requests inside the window, and how many of them matched no entry point (static files, 404s, other services). */
+  requests: number;
+  public: number;
+  internal: number;
+  unmatched: number;
+  routesSeen: number;
+  routesCold: number;
+  /** The log window ends more than `windowDays` before the scan, so cold routes are not held against the code. */
+  stale: boolean;
+}
+
+/** A service this application talks to, found in its deployment and configuration files. */
+export interface ServiceLink {
+  /** Host name or compose/Kubernetes service name as written. */
+  host: string;
+  port?: number;
+  /** Where it was found: compose, kubernetes, env, config. */
+  kind: string;
+  evidence: string;
+  /** A name with a public-looking domain (api.stripe.com); otherwise an internal service name. */
+  external: boolean;
+}
+
+/** The names this application is known by, so other applications' links can be matched to it. */
+export interface ServiceIdentity {
+  names: string[];
+  hosts: string[];
+}
+
+export interface ServiceLinks {
+  identity: ServiceIdentity;
+  outbound: ServiceLink[];
 }
 
 export type Decision = 'Act' | 'Attend' | 'Track*' | 'Track';
@@ -248,6 +331,10 @@ export interface ScanReport {
   summary: ScanSummary;
   exposure: Exposure;
   entryPoints: EntryPoint[];
+  /** What the access logs recorded (absent when the project names no logs). */
+  traffic?: TrafficSummary;
+  /** Services this application calls and the names it answers to (absent in reports before 1.1). */
+  links?: ServiceLinks;
   /** Every installed component (absent in reports written before 0.3). */
   components?: Component[];
   /** Container images and SBOMs read for this scan (absent before 0.8). */

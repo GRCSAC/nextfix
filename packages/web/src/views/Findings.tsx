@@ -5,7 +5,8 @@ import { DecisionBadge } from '../components/DecisionBadge.tsx';
 import { ExceptionBox } from '../components/ExceptionBox.tsx';
 import { PathDiagram } from '../components/PathDiagram.tsx';
 import { I } from '../components/Icons.tsx';
-import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, bestPath, entryLabel, fixCommand, severity, shortDate, ticketMarkdown } from '../format.ts';
+import { DECISIONS, DECISION_META, TIERS, TIER_LABEL, TIER_SHORT, advisoryName, bestPath, compact, entryLabel, fixCommand, severity, shortDate, ticketMarkdown, trafficPhrase } from '../format.ts';
+import { hasTraffic, windowPhrase } from '../analytics.ts';
 
 interface Props {
   report: ScanReport;
@@ -30,6 +31,25 @@ interface Props {
 }
 
 const KIND_LABEL: Record<TicketKind, string> = { github: 'GitHub issue', jira: 'Jira issue' };
+type TrafficFilter = 'all' | 'public' | 'internal' | 'cold';
+const TRAFFIC_FILTERS: { id: TrafficFilter; label: string }[] = [
+  { id: 'all', label: 'Any traffic' },
+  { id: 'public', label: 'Called from the internet' },
+  { id: 'internal', label: 'Internal traffic only' },
+  { id: 'cold', label: 'Nobody called it' },
+];
+/** The worst-case route's traffic: public on an open route beats anything, then any requests, then quiet. */
+function trafficClass(f: Finding): TrafficFilter | undefined {
+  const ts = f.reach.paths.map((p) => p.entry.traffic).filter((t): t is NonNullable<typeof t> => !!t);
+  if (!ts.length) return undefined;
+  if (f.reach.paths.some((p) => !p.entry.authenticated && (p.entry.traffic?.public ?? 0) > 0)) return 'public';
+  if (ts.some((t) => t.requests > 0)) return 'internal';
+  return 'cold';
+}
+function bestTraffic(f: Finding) {
+  const p = bestPath(f);
+  return p?.entry.traffic;
+}
 const PHONE = '(max-width: 760px)';
 const SHEET = '(max-width: 1100px)';
 
@@ -50,6 +70,9 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
   const decision: Decision | 'all' = DECISIONS.includes(query.decision as Decision) ? (query.decision as Decision) : 'all';
   const tier: ReachTier | 'all' = TIERS.includes(query.tier as ReachTier) ? (query.tier as ReachTier) : 'all';
   const q = query.q ?? '';
+  const observed = hasTraffic(report);
+  const traffic: TrafficFilter = observed && TRAFFIC_FILTERS.some((t) => t.id === query.traffic) ? (query.traffic as TrafficFilter) : 'all';
+  const days = report.traffic?.windowDays ?? 30;
   const setFilter = (patch: Record<string, string>, replace = false) => onQuery({ ...query, ...patch }, replace);
   const [bulk, setBulk] = useState<string | null>(null);
   const phone = useMediaQuery(PHONE);
@@ -78,9 +101,10 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
     return report.findings.filter((f) =>
       (decision === 'all' || f.decision === decision) &&
       (tier === 'all' || f.reach.tier === tier) &&
+      (traffic === 'all' || trafficClass(f) === traffic) &&
       (!needle || `${f.component.name} ${advisoryName(f)} ${f.advisory.id} ${f.advisory.summary} ${entryLabel(f) ?? ''}`.toLowerCase().includes(needle)),
     );
-  }, [report, decision, tier, q]);
+  }, [report, decision, tier, traffic, q]);
 
   const selected = selectedId ? report.findings.find((f) => f.id === selectedId) : undefined;
 
@@ -97,6 +121,11 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
           <option value="all">Any reachability</option>
           {TIERS.map((t) => <option key={t} value={t}>{TIER_SHORT[t]} ({report.summary.byTier[t]})</option>)}
         </select>
+        {observed && (
+          <select aria-label="Observed traffic" value={traffic} onChange={(e) => setFilter({ traffic: e.target.value === 'all' ? '' : e.target.value })}>
+            {TRAFFIC_FILTERS.map((t) => <option key={t.id} value={t.id}>{t.label}{t.id !== 'all' ? ` (${report.findings.filter((f) => trafficClass(f) === t.id).length})` : ''}</option>)}
+          </select>
+        )}
         <input type="search" placeholder="Search package, CVE, route…" value={q} onChange={(e) => setFilter({ q: e.target.value }, true)} aria-label="Search findings" />
         <a className="btn small" href={api.vexUrl(scanId)} download><I.download /> VEX</a>
         {kinds.map((k) => {
@@ -120,6 +149,7 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
                     <span className="qcard-meta">
                       <span className={`sev ${sev.cls}`}>{sev.label}</span>
                       <span>{TIER_SHORT[f.reach.tier]}</span>
+                      {observed && bestTraffic(f) && <span className={`traffic-tag ${trafficClass(f)}`}>{trafficPhrase(bestTraffic(f), days)}</span>}
                       {f.advisory.fixedVersion ? <span className="qcard-fix">→ {f.advisory.fixedVersion}</span> : <span className="muted">no fix</span>}
                       {(tickets[f.id] ?? []).map((t) => <span key={t.kind} className="ticket-link">{t.key}</span>)}
                     </span>
@@ -146,7 +176,7 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
                       <td>{advisoryName(f)}<div className="muted small">{f.advisory.summary}</div></td>
                       <td><span className={`sev ${sev.cls}`}>{sev.label}</span></td>
                       <td>{TIER_SHORT[f.reach.tier]}</td>
-                      <td className="mono small">{entryLabel(f) ?? <span className="muted">—</span>}</td>
+                      <td className="mono small">{entryLabel(f) ?? <span className="muted">—</span>}{observed && bestTraffic(f) && <div className={`traffic-tag ${trafficClass(f)}`}>{trafficPhrase(bestTraffic(f), days)}</div>}</td>
                       <td>{f.advisory.fixedVersion ? `→ ${f.advisory.fixedVersion}` : <span className="muted">no fix</span>}</td>
                       <td>{(tickets[f.id] ?? []).map((t) => <a key={t.kind} className="ticket-link" href={t.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{t.key}</a>)}</td>
                     </tr>
@@ -157,7 +187,7 @@ export function Findings({ report, firstSeen, scanId, targetId, selectedId, quer
             </table>
           </div>
         )}
-        {selected && <Detail f={selected} firstSeenAt={firstSeen[selected.id]} scanId={scanId} targetId={targetId} targetName={report.target.name ?? report.target.dir} tickets={tickets[selected.id] ?? []} kinds={kinds} role={role} exception={exceptions[selected.id]} accepted={accepted.has(selected.id)} onTicketsChange={onTicketsChange} onExceptionsChange={onExceptionsChange} onClose={() => onSelect(undefined)} />}
+        {selected && <Detail f={selected} report={report} firstSeenAt={firstSeen[selected.id]} scanId={scanId} targetId={targetId} targetName={report.target.name ?? report.target.dir} tickets={tickets[selected.id] ?? []} kinds={kinds} role={role} exception={exceptions[selected.id]} accepted={accepted.has(selected.id)} onTicketsChange={onTicketsChange} onExceptionsChange={onExceptionsChange} onClose={() => onSelect(undefined)} />}
       </div>
     </div>
   );
@@ -179,6 +209,7 @@ function shortCommit(url: string): string {
 
 interface DetailProps {
   f: Finding;
+  report: ScanReport;
   firstSeenAt?: string;
   scanId: number;
   targetId: number;
@@ -198,7 +229,7 @@ interface DetailProps {
  * is fetched when it opens. Below 1100 px the panel is a full-height sheet: focus moves to
  * Close, Escape and the backdrop close it, and focus returns to the row afterwards.
  */
-function Detail({ f, firstSeenAt, scanId, targetId, targetName, tickets, kinds, role, exception, accepted, onTicketsChange, onExceptionsChange, onClose }: DetailProps) {
+function Detail({ f, report, firstSeenAt, scanId, targetId, targetName, tickets, kinds, role, exception, accepted, onTicketsChange, onExceptionsChange, onClose }: DetailProps) {
   const [copied, setCopied] = useState<string | null>(null);
   const [creating, setCreating] = useState<TicketKind | null>(null);
   const [ticketError, setTicketError] = useState<string | null>(null);
@@ -296,6 +327,29 @@ function Detail({ f, firstSeenAt, scanId, targetId, targetName, tickets, kinds, 
           )}
           {data.reach.paths.length > 1 && <p className="empty">{data.reach.paths.length} entry points reach this call, {data.reach.paths.filter((p) => p.userInput).length} carrying request data; the worst case is shown.</p>}
         </section>
+
+        {report.traffic && data.reach.paths.length > 0 && (
+          <section>
+            <h3>Observed traffic · {windowPhrase(report) || `${report.traffic.windowDays} days`}</h3>
+            {hasTraffic(report) ? (
+              <table className="tbl mini">
+                <thead><tr><th>Route</th><th className="num">Requests</th><th className="num">Public</th><th className="num">Internal</th><th>Last seen</th></tr></thead>
+                <tbody>
+                  {data.reach.paths.map((p) => (
+                    <tr key={`${p.entry.method} ${p.entry.path}`}>
+                      <td className="mono small">{p.entry.method} {p.entry.path}{p.entry.authenticated ? <span className="muted"> · login</span> : null}</td>
+                      <td className="num">{compact(p.entry.traffic?.requests ?? 0)}</td>
+                      <td className={`num ${(p.entry.traffic?.public ?? 0) > 0 ? 'traffic-public' : ''}`}>{compact(p.entry.traffic?.public ?? 0)}</td>
+                      <td className="num">{compact(p.entry.traffic?.internal ?? 0)}</td>
+                      <td className="small muted">{p.entry.traffic?.lastSeenAt ? shortDate(p.entry.traffic.lastSeenAt) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="empty">The configured logs held no requests that could be read.</p>}
+            {report.traffic.stale && <p className="hint">The logs end more than a month before this scan; quiet routes do not lower the decision.</p>}
+          </section>
+        )}
 
         {data.symbols && (
           <section>
