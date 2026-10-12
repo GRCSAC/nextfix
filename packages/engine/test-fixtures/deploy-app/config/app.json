@@ -1,0 +1,1 @@
+{ "analytics": "https://plausible.io/api/event", "warehouse": "postgres://warehouse.acme.internal:5432/x", "docs": "https://example.com/ignored" }

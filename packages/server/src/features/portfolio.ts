@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { Decision, Finding, ScanReport, ScanSummary } from '../../../engine/src/types.ts';
+import type { Decision, Finding, InternetReach, ScanReport, ScanSummary } from '../../../engine/src/types.ts';
 import { FeatureError, type Route } from './core.ts';
 import { activeExceptions, applyExceptions, isInForce, latestReport, targetExists } from './exceptions.ts';
 import { MAX_LOG_PATH, MAX_LOG_SOURCES, parseAccessLogs } from './surface.ts';
@@ -47,6 +47,8 @@ export interface PortfolioRow {
   /** Actionable (Act + Attend) findings per scan, oldest first, up to 8 scans. */
   trend: number[];
   pendingExceptions: number;
+  /** Internet reach from the latest report; absent for reports written before 1.1. */
+  reach?: InternetReach;
 }
 
 export const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
@@ -248,6 +250,7 @@ export function portfolioRow(db: DatabaseSync, target: TargetMeta, sla: SlaDays,
     oldestPastSlaDays: breaches.length ? breaches[0]!.overdueDays : undefined,
     trend: trend(db, target.id),
     pendingExceptions: pending,
+    reach: report.exposure.reach,
   };
 }
 

@@ -1,4 +1,4 @@
-import type { Advisory, Component, Decision, Finding, ScanReport, ScanSummary } from '../../engine/src/types.ts';
+import type { Advisory, Component, Decision, Finding, InternetReach, ScanReport, ScanSummary } from '../../engine/src/types.ts';
 
 export type { Component, Decision, Finding, ScanReport, ScanSummary };
 export type { EntryPoint, ReachTier, ReachPath, RouteTraffic, TrafficSummary, TrafficFile, Exposure, InternetReach, ServiceLink, ServiceLinks } from '../../engine/src/types.ts';
@@ -125,8 +125,37 @@ export interface PortfolioTarget {
   /** Actionable findings per scan, oldest first, up to 8. */
   trend: number[];
   pendingExceptions: number;
+  /** Internet reach from the latest report (absent for applications scanned before 1.1). */
+  reach?: InternetReach;
+  /** Surface changes since the previous scan (new open routes, guards removed, exposure changes). */
+  surfaceChanges?: number;
 }
 export interface Portfolio { targets: PortfolioTarget[] }
+
+// ---------------------------------------------------------------------------------------------
+// Portfolio map
+
+export interface MapNode {
+  id: number;
+  name: string;
+  owner: string | null;
+  posture: Posture;
+  byDecision: Record<Decision, number>;
+  reach: InternetReach;
+  reachEvidence: string[];
+  lastScanAt?: string;
+  identity: { names: string[]; hosts: string[] };
+  headline?: string;
+  findingId?: string;
+  exposedSurface: { open: number; total: number };
+  /** Applications that depend on this one, directly or through others. */
+  upstream: number[];
+  /** Applications this one reaches, directly or through others. */
+  downstream: number[];
+}
+export interface MapEdge { from: number; to: number; host: string; evidence: string }
+export interface ExternalNode { host: string; external: boolean; callers: { id: number; evidence: string }[] }
+export interface PortfolioMap { nodes: MapNode[]; edges: MapEdge[]; external: ExternalNode[]; internet: number[]; computedAt: string }
 
 // ---------------------------------------------------------------------------------------------
 // Weekly digest
@@ -297,6 +326,7 @@ export const api = {
   updateException: (id: string, body: { status: 'approved' | 'rejected' | 'revoked'; reason?: string }) => call<Exception>(`/api/exceptions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   // portfolio and targets
   portfolio: (signal?: AbortSignal) => call<Portfolio>('/api/portfolio', { signal }),
+  portfolioMap: (signal?: AbortSignal) => call<PortfolioMap>('/api/portfolio/map', { signal }),
   updateTarget: (targetId: number, patch: { owner?: string | null; schedule?: Schedule | null; accessLogs?: string[] | null }) => call<Target>(`/api/targets/${targetId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   // digest (admin)
   digest: () => call<DigestSettings>('/api/settings/digest'),

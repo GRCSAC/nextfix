@@ -12,7 +12,7 @@
  */
 import type {
   ApiToken, AuditRow, Component, Decision, DigestSettings, EntryPoint, Exception, ExceptionKind, Finding, History, Integrations, ListReport,
-  OidcProvider, Portfolio, PortfolioTarget, ReachTier, Role, ScanDiff, ScanMeta, ScanReport, ScanSummary, Session, Settings, Target, TicketMap, User,
+  ExternalNode, InternetReach, MapEdge, MapNode, OidcProvider, Portfolio, PortfolioMap, PortfolioTarget, ReachTier, Role, ScanDiff, ScanMeta, ScanReport, ScanSummary, Session, Settings, Target, TicketMap, User,
 } from './api.ts';
 
 const VERSION = '0.10.0-mock';
@@ -323,6 +323,44 @@ function historyFor(t: MockTarget): History {
   return { rows, open, pastSla, sla: { slaActDays: settings.slaActDays, slaAttendDays: settings.slaAttendDays }, medianDaysToResolve: 11, resolvedLast30: 3, introducedLast30: 2, firstSeen: t.firstSeen, computedAt: iso(0) };
 }
 
+/** Links between the mock applications: shop calls billing; the portal calls shop; shop and billing use Stripe. */
+const MOCK_LINKS: Record<number, { host: string; evidence: string; external: boolean }[]> = {
+  1: [{ host: 'billing-worker', evidence: 'docker-compose.yml: services.shop-api.depends_on billing-worker', external: false }, { host: 'api.stripe.com', evidence: 'docker-compose.yml: services.shop-api.environment: STRIPE_API=https://api.stripe.com', external: true }, { host: 'search', evidence: '.env.example: SEARCH_HOST=search', external: false }],
+  2: [{ host: 'api.stripe.com', evidence: '.env.example: STRIPE_URL=https://api.stripe.com/v1', external: true }, { host: 'warehouse.acme.internal', evidence: 'config/app.json: warehouse.acme.internal:5432', external: false }],
+  3: [{ host: 'shop-api', evidence: 'k8s/deploy.yaml: Deployment partner-portal env: SHOP_URL=http://shop-api.default.svc.cluster.local', external: false }, { host: 'smtp.sendgrid.net', evidence: '.env.example: MAIL_HOST=smtp.sendgrid.net', external: true }],
+};
+const MOCK_REACH: Record<number, { reach: InternetReach; evidence: string[] }> = {
+  1: { reach: 'internet', evidence: ['access logs: 59,460 requests from public addresses in the 30 days to today', 'infra/alb.tf: aws_lb "shop" is internet-facing on :443'] },
+  2: { reach: 'internal', evidence: ['infra/alb.tf: aws_lb "billing" is internal'] },
+  3: { reach: 'internet', evidence: ['k8s/ingress.yaml: Ingress partner for partners.acme.com'] },
+};
+
+function portfolioMap(): PortfolioMap {
+  const rows = portfolio().targets;
+  const names = new Map(rows.map((t) => [t.name.toLowerCase(), t.id]));
+  const edges: MapEdge[] = [];
+  const external = new Map<string, ExternalNode>();
+  for (const t of rows) {
+    for (const l of MOCK_LINKS[t.id] ?? []) {
+      const to = names.get(l.host.toLowerCase());
+      if (to !== undefined && to !== t.id) edges.push({ from: t.id, to, host: l.host, evidence: l.evidence });
+      else {
+        const x = external.get(l.host) ?? { host: l.host, external: l.external, callers: [] };
+        x.callers.push({ id: t.id, evidence: l.evidence });
+        external.set(l.host, x);
+      }
+    }
+  }
+  const reach = (id: number, dir: 'from' | 'to') => {
+    const seen = new Set<number>();
+    const stack = edges.filter((e) => e[dir] === id).map((e) => (dir === 'from' ? e.to : e.from));
+    while (stack.length) { const n = stack.pop()!; if (n === id || seen.has(n)) continue; seen.add(n); for (const e of edges) if (e[dir] === n) stack.push(dir === 'from' ? e.to : e.from); }
+    return [...seen].sort((a, b) => a - b);
+  };
+  const nodes: MapNode[] = rows.map((t) => ({ id: t.id, name: t.name, owner: t.owner ?? null, posture: t.posture, byDecision: t.byDecision, reach: MOCK_REACH[t.id]?.reach ?? 'unknown', reachEvidence: MOCK_REACH[t.id]?.evidence ?? [], lastScanAt: t.lastScanAt, identity: { names: [t.name], hosts: [] }, headline: t.posture === 'Exposed' ? targets.find((x) => x.target.id === t.id)?.scans.at(-1)?.report.findings[0]?.why[0] : undefined, exposedSurface: t.exposedSurface, upstream: reach(t.id, 'to'), downstream: reach(t.id, 'from') }));
+  return { nodes, edges, external: [...external.values()], internet: nodes.filter((n) => n.reach === 'internet').map((n) => n.id), computedAt: iso(0) };
+}
+
 function portfolio(): Portfolio {
   const rows: PortfolioTarget[] = targets.map((t) => {
     const last = t.scans[t.scans.length - 1];
@@ -340,7 +378,7 @@ function portfolio(): Portfolio {
       const sla = f.decision === 'Act' ? settings.slaActDays : f.decision === 'Attend' ? settings.slaAttendDays : Infinity;
       if (tpl.firstSeenDays > sla) oldest = Math.max(oldest ?? 0, tpl.firstSeenDays - sla);
     }
-    return { id: t.target.id, name: t.target.name ?? t.target.dir, dir: t.target.dir, owner: t.target.owner, lastScanAt: last?.meta.createdAt, posture, byDecision, exposedSurface: { open: exposed.length, total: openRoutes.length }, oldestPastSlaDays: oldest, trend: t.scans.slice(-8).map((x) => x.meta.summary.byDecision.Act + x.meta.summary.byDecision.Attend), pendingExceptions: (exceptions[t.target.id] ?? []).filter((e) => e.status === 'pending').length, ...(s ? {} : {}) };
+    return { id: t.target.id, name: t.target.name ?? t.target.dir, dir: t.target.dir, owner: t.target.owner, lastScanAt: last?.meta.createdAt, posture, byDecision, exposedSurface: { open: exposed.length, total: openRoutes.length }, oldestPastSlaDays: oldest, trend: t.scans.slice(-8).map((x) => x.meta.summary.byDecision.Act + x.meta.summary.byDecision.Attend), pendingExceptions: (exceptions[t.target.id] ?? []).filter((e) => e.status === 'pending').length, reach: last ? MOCK_REACH[t.target.id]?.reach ?? 'unknown' : undefined, surfaceChanges: t.target.id === 1 ? 2 : 0, ...(s ? {} : {}) };
   });
   return { targets: rows };
 }
@@ -536,6 +574,7 @@ async function route(method: string, path: string, query: URLSearchParams, body:
   }
 
   // --- portfolio
+  if (a === 'portfolio' && b === 'map' && method === 'GET') return json(200, portfolioMap());
   if (a === 'portfolio' && method === 'GET') return json(200, portfolio());
 
   // --- targets

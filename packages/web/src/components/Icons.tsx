@@ -44,6 +44,8 @@ export const I = {
   chevronDown: ({ size = 14, ...p }: P) => <svg {...base(size, p)}><path d="M6 9l6 6 6-6" /></svg>,
   calendar: ({ size = 16, ...p }: P) => <svg {...base(size, p)}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>,
   decide: ({ size = 18, ...p }: P) => <svg {...base(size, p)}><path d="M12 3v4M12 7l-6 5M12 7l6 5" /><circle cx="6" cy="16" r="3" /><circle cx="18" cy="16" r="3" /></svg>,
+  map: ({ size = 20, ...p }: P) => <svg {...base(size, p)}><circle cx="5" cy="6" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M7.2 7.2l3.6 8.6M16.8 7.2l-3.6 8.6M7.5 6h9" /></svg>,
+  globe: ({ size = 16, ...p }: P) => <svg {...base(size, p)}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z" /></svg>,
 };
 
 /** The brand mark: a bold gradient N whose diagonal reads as a forward chevron. */

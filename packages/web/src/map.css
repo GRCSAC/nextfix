@@ -1,0 +1,60 @@
+/* Portfolio map: layered nodes over an SVG edge layer, the blast-radius panel, and the connections card. */
+.map-card { padding: 12px; }
+.map-scroll { overflow: auto; max-width: 100%; }
+.map-canvas { position: relative; min-width: 100%; }
+.map-edges { position: absolute; inset: 0; overflow: visible; color: var(--axis); }
+.map-edge { fill: none; stroke: currentColor; stroke-width: 1.6; color: var(--axis); transition: color 0.15s, opacity 0.15s; }
+.map-edge.internet { stroke-dasharray: 5 4; color: var(--c-act); opacity: 0.7; }
+.map-edge.external { stroke-dasharray: 2 4; }
+.map-edge.up { color: var(--c-attend); stroke-width: 2.4; }
+.map-edge.down { color: var(--c-aside); stroke-width: 2.4; }
+.map-edge.selected { opacity: 1; stroke-width: 2.4; }
+.map-edge.dim { opacity: 0.18; }
+
+.map-node { position: absolute; width: 196px; height: 78px; display: grid; align-content: start; gap: 2px; text-align: left; padding: 9px 12px; border-radius: 12px; border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--border)); background: color-mix(in srgb, var(--c) 9%, var(--surface)); color: var(--ink); font: inherit; cursor: pointer; --c: var(--muted); transition: opacity 0.15s, box-shadow 0.15s; box-shadow: var(--shadow); }
+.map-node.p-act { --c: var(--c-act); } .map-node.p-attend { --c: var(--c-attend); } .map-node.p-watch { --c: var(--c-watch); } .map-node.p-good { --c: var(--c-good); }
+.map-node:hover { background: color-mix(in srgb, var(--c) 16%, var(--surface)); }
+.map-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.map-node.selected { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 45%, transparent), var(--shadow); }
+.map-node.up { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-attend) 55%, transparent); }
+.map-node.down { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-aside) 55%, transparent); }
+.map-node.dim { opacity: 0.35; }
+.map-node-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.map-node-name { font-weight: 700; font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-node-globe { color: var(--c-act); flex: none; }
+.map-node-posture { font-size: 0.82rem; font-weight: 600; color: var(--c); }
+.map-node-foot { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.map-internet { position: absolute; width: 120px; height: 78px; display: grid; align-content: center; justify-items: center; gap: 2px; border-radius: 40px; border: 1.5px dashed color-mix(in srgb, var(--c-act) 60%, var(--border)); background: color-mix(in srgb, var(--c-act) 6%, var(--surface)); color: var(--c-act-text); font-weight: 700; font-size: 0.9rem; }
+.map-ext { position: absolute; width: 196px; height: 78px; display: grid; align-content: center; gap: 2px; padding: 8px 12px; border-radius: 12px; border: 1.5px dashed var(--border); background: var(--surface-2); }
+.map-ext.unknown { border-style: dotted; }
+.map-ext-host { font-family: var(--mono); font-size: 0.82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; align-items: center; }
+.map-key { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--axis); vertical-align: middle; margin-right: 5px; }
+.map-key.up { border-color: var(--c-attend); } .map-key.down { border-color: var(--c-aside); }
+
+.blast { border-left: 6px solid var(--p); --p: var(--muted); }
+.blast.p-act { --p: var(--c-act); } .blast.p-attend { --p: var(--c-attend); } .blast.p-watch { --p: var(--c-watch); } .blast.p-good { --p: var(--c-good); }
+.blast h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.blast-headline { font-weight: 600; margin: 0 0 10px; }
+.blast-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.blast-col { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); --b: var(--muted); }
+.blast-col.up { --b: var(--c-attend); } .blast-col.down { --b: var(--c-aside); }
+.blast-col h3 { font-size: 0.9rem; margin: 0 0 4px; display: flex; align-items: baseline; gap: 6px; }
+.blast-n { font-size: 1.3rem; font-weight: 800; color: var(--b); }
+.blast-col p { margin: 0; line-height: 1.45; }
+.blast-note { margin: 10px 0 0; font-size: 0.9rem; color: var(--ink-2); }
+@media (max-width: 760px) { .blast-grid { grid-template-columns: 1fr; } }
+
+.map-list { display: none; list-style: none; margin: 0; padding: 0; gap: 8px; }
+@media (max-width: 760px) { .map-card { display: none; } .map-list { display: grid; } .map-page > .hint { display: none; } }
+
+.conn { display: grid; gap: 8px; }
+.conn-row { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: start; }
+.conn-label { font-size: 0.82rem; color: var(--muted); font-weight: 600; padding-top: 4px; }
+.conn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.conn-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--c) 50%, var(--border)); background: color-mix(in srgb, var(--c) 9%, var(--surface)); color: var(--ink); font: inherit; font-size: 0.84rem; font-weight: 600; cursor: pointer; --c: var(--muted); }
+.conn-chip.p-act { --c: var(--c-act); } .conn-chip.p-attend { --c: var(--c-attend); } .conn-chip.p-watch { --c: var(--c-watch); } .conn-chip.p-good { --c: var(--c-good); }
+.conn-chip.ext { cursor: default; font-family: var(--mono); font-weight: 500; border-style: dashed; }
+.conn-chip:not(.ext):hover { background: color-mix(in srgb, var(--c) 18%, var(--surface)); }
+.conn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

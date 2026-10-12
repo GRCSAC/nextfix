@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Portfolio as PortfolioData, type PortfolioTarget, type Posture } from '../api.ts';
+import { REACH_LABEL } from './Map.tsx';
 import { I } from '../components/Icons.tsx';
 import { dateTime } from '../format.ts';
 
@@ -24,7 +25,7 @@ function ago(iso?: string): string {
 }
 
 /** Every application on one page: posture tiles, then rows sorted by posture and the oldest SLA breach. */
-export function Portfolio({ onOpen }: { onOpen: (id: number) => void }) {
+export function Portfolio({ onOpen, go }: { onOpen: (id: number) => void; go?: (page: string) => void }) {
   const [data, setData] = useState<PortfolioData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Posture | null>(null);
@@ -44,6 +45,7 @@ export function Portfolio({ onOpen }: { onOpen: (id: number) => void }) {
   if (!data) return <p className="empty">Loading…</p>;
   const actionable = data.targets.reduce((n, t) => n + t.byDecision.Act + t.byDecision.Attend, 0);
   const pending = data.targets.reduce((n, t) => n + t.pendingExceptions, 0);
+  const internet = data.targets.filter((t) => t.reach === 'internet').length;
 
   return (
     <div className="stack">
@@ -51,8 +53,9 @@ export function Portfolio({ onOpen }: { onOpen: (id: number) => void }) {
         <span className="icon-box big"><I.portfolio size={28} /></span>
         <div className="grow">
           <h1>Portfolio</h1>
-          <div className="muted small">{data.targets.length} application{data.targets.length === 1 ? '' : 's'} · {actionable} finding{actionable === 1 ? '' : 's'} need action{pending ? ` · ${pending} exception${pending === 1 ? '' : 's'} awaiting approval` : ''}</div>
+          <div className="muted small">{data.targets.length} application{data.targets.length === 1 ? '' : 's'} · {actionable} finding{actionable === 1 ? '' : 's'} need action{internet ? ` · ${internet} internet-facing` : ''}{pending ? ` · ${pending} exception${pending === 1 ? '' : 's'} awaiting approval` : ''}</div>
         </div>
+        {go && <button type="button" className="btn small" onClick={() => go('map')}><I.map /> Map</button>}
       </div>
 
       <div className="posture-strip" role="group" aria-label="Applications by posture">
@@ -67,10 +70,10 @@ export function Portfolio({ onOpen }: { onOpen: (id: number) => void }) {
 
       <div className="card table-wrap">
         <table className="tbl portfolio">
-          <thead><tr><th>Application</th><th>Posture</th><th>Owner</th><th>Last scan</th><th className="num">Need action</th><th>Exposed surface</th><th>Trend</th><th className="num">Pending</th></tr></thead>
+          <thead><tr><th>Application</th><th>Posture</th><th>Reach</th><th>Owner</th><th>Last scan</th><th className="num">Need action</th><th>Exposed surface</th><th>Trend</th><th className="num">Pending</th></tr></thead>
           <tbody>
             {rows.map((t) => <Row key={t.id} t={t} onOpen={() => onOpen(t.id)} />)}
-            {!rows.length && <tr><td colSpan={8} className="empty">{filter ? `No application is ${filter.toLowerCase()}.` : 'No applications yet. Add one under Apps.'}</td></tr>}
+            {!rows.length && <tr><td colSpan={9} className="empty">{filter ? `No application is ${filter.toLowerCase()}.` : 'No applications yet. Add one under Apps.'}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -83,6 +86,11 @@ export function Portfolio({ onOpen }: { onOpen: (id: number) => void }) {
   );
 }
 
+function ReachTag({ reach }: { reach?: PortfolioTarget['reach'] }) {
+  if (!reach || reach === 'unknown') return <span className="muted small">not confirmed</span>;
+  return <span className={`reach-tag ${reach}`}>{reach === 'internet' ? <I.globe size={13} /> : <I.lock size={13} />} {REACH_LABEL[reach]}</span>;
+}
+
 function PostureTag({ posture }: { posture: Posture }) {
   const p = POSTURES.find((x) => x.id === posture)!;
   return <span className={`posture-tag p-${p.cls}`}><span aria-hidden="true">{p.icon}</span> {posture}</span>;
@@ -93,7 +101,8 @@ function Row({ t, onOpen }: { t: PortfolioTarget; onOpen: () => void }) {
   return (
     <tr className="row" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}>
       <td><span className="pkg">{t.name}</span><div className="muted small mono">{t.dir}</div></td>
-      <td><PostureTag posture={t.posture} />{t.oldestPastSlaDays !== undefined && <div className="small past-text">{t.oldestPastSlaDays} day{t.oldestPastSlaDays === 1 ? '' : 's'} past SLA</div>}</td>
+      <td><PostureTag posture={t.posture} />{t.oldestPastSlaDays !== undefined && <div className="small past-text">{t.oldestPastSlaDays} day{t.oldestPastSlaDays === 1 ? '' : 's'} past SLA</div>}{t.surfaceChanges ? <div className="small surface-text">{t.surfaceChanges} surface change{t.surfaceChanges === 1 ? '' : 's'}</div> : null}</td>
+      <td><ReachTag reach={t.reach} /></td>
       <td>{t.owner || <span className="muted">unassigned</span>}</td>
       <td className="muted nowrap">{ago(t.lastScanAt)}</td>
       <td className="num"><strong>{actionable}</strong>{actionable > 0 && <div className="muted small nowrap">{t.byDecision.Act} now · {t.byDecision.Attend} next</div>}</td>
@@ -110,7 +119,7 @@ function Card({ t, onOpen }: { t: PortfolioTarget; onOpen: () => void }) {
     <li>
       <button type="button" className="pf-card" onClick={onOpen}>
         <span className="pf-top"><span className="pkg">{t.name}</span><PostureTag posture={t.posture} /></span>
-        <span className="pf-meta muted small">{t.owner || 'unassigned'} · {t.lastScanAt ? `scanned ${ago(t.lastScanAt)}` : 'never scanned'}{t.oldestPastSlaDays !== undefined ? <> · <span className="past-text">{t.oldestPastSlaDays} d past SLA</span></> : ''}</span>
+        <span className="pf-meta muted small">{t.owner || 'unassigned'} · {t.lastScanAt ? `scanned ${ago(t.lastScanAt)}` : 'never scanned'}{t.reach && t.reach !== 'unknown' ? ` · ${REACH_LABEL[t.reach].toLowerCase()}` : ''}{t.oldestPastSlaDays !== undefined ? <> · <span className="past-text">{t.oldestPastSlaDays} d past SLA</span></> : ''}{t.surfaceChanges ? <> · <span className="surface-text">{t.surfaceChanges} surface change{t.surfaceChanges === 1 ? '' : 's'}</span></> : ''}</span>
         <span className="pf-bottom">
           <span><strong>{actionable}</strong> <span className="muted small">need action</span></span>
           <span>{t.exposedSurface.total ? <><strong>{t.exposedSurface.open}</strong><span className="muted small"> of {t.exposedSurface.total} open routes</span></> : null}</span>

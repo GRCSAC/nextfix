@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: shop
+          image: ghcr.io/acme/shop-api:1.4
+          env:
+            - name: INVENTORY_URL
+              value: http://inventory.default.svc.cluster.local:8080
+            - name: MAIL_HOST
+              value: smtp.sendgrid.net
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-api
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop
+spec:
+  rules:
+    - host: shop.acme.com
+      http:
+        paths:
+          - path: /
+            backend:
+              service:
+                name: shop-api
+                port:
+                  number: 80

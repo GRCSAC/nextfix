@@ -191,3 +191,9 @@ table.tbl.portfolio tr.row:focus-visible { outline: 2px solid var(--accent); out
 /* Shown after "Stop the dashboards": the page can no longer reach the server. */
 .stopped-notice { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center; gap: 6px; padding: 24px; text-align: center; background: var(--page); color: var(--ink); }
 .stopped-notice strong { font-size: 1.2rem; }
+
+/* ---------- internet reach and surface changes in the portfolio ---------- */
+.reach-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
+.reach-tag.internet { color: var(--c-act-text); }
+.reach-tag.internal { color: var(--c-good-text); }
+.surface-text { color: var(--c-attend-text); font-weight: 600; }

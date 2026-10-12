@@ -20,6 +20,8 @@ import { analyzeProject } from './graph/js/project.ts';
 import { assessReach } from './reach/reachability.ts';
 import { analyzeExposure } from './exposure/docker.ts';
 import { observeTraffic } from './exposure/traffic.ts';
+import { analyzeInfra, applyInfra } from './exposure/infra.ts';
+import { discoverLinks } from './exposure/links.ts';
 import { decide } from './decide/ssvc.ts';
 import { toolVersion } from './version.ts';
 import { asList, configLogProblem, loadConfig } from './config.ts';
@@ -289,6 +291,12 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
 
     checkAbort();
     const exposure = analyzeExposure(rootDir, graph.listenLocalOnly);
+    // Internet reach from the infrastructure files (or the config's declaration), and the services this application talks to.
+    const infra = analyzeInfra(rootDir, { ignore: config.ignore, declared: config.internetFacing, log });
+    applyInfra(exposure, infra);
+    if (infra.reach !== 'unknown') log(`Exposure: ${infra.reach === 'internet' ? 'internet-facing' : 'not reachable from the internet'} (${infra.evidence[0] ?? ''})`);
+    const links = discoverLinks(rootDir, { ignore: config.ignore, projectName: inv.projectName, images: imageRefs, log });
+    if (links.outbound.length) log(`Links: ${links.outbound.length} service${links.outbound.length === 1 ? '' : 's'} referenced (${links.outbound.slice(0, 4).map((l) => l.host).join(', ')}${links.outbound.length > 4 ? ', …' : ''}); known as ${links.identity.names.join(', ') || inv.projectName}`);
 
     // Observed traffic: the access logs, counted against the entry points. Config paths stay inside
     // the project; the caller's paths (command line, application settings) may point anywhere.
@@ -449,6 +457,7 @@ export async function scan(dir: string, opts: ScanOptions = {}): Promise<ScanRep
       exposure,
       entryPoints: graph.entryPoints,
       traffic,
+      links,
       components: inv.components,
       images,
       goAnalysis,

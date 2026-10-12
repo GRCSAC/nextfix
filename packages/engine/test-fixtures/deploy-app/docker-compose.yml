@@ -1,0 +1,18 @@
+services:
+  shop:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      BILLING_URL: http://billing:8080/v1
+      SEARCH_HOST: search
+      STRIPE_API: https://api.stripe.com
+    depends_on:
+      - billing
+      - db
+  billing:
+    image: ghcr.io/acme/billing:2.1
+  db:
+    image: postgres:16
+  search:
+    image: opensearchproject/opensearch:2

@@ -5,6 +5,7 @@ import { HowItWorks } from '../components/HowItWorks.tsx';
 import { BridgeChart, DecidePanel, FunnelChart, LeverageChart, MatrixChart, SurfaceTiles, TrafficPanel, VerdictCard, WorkQueue } from '../components/Panels.tsx';
 import { I } from '../components/Icons.tsx';
 import { AgeingPanel, RecheckButton } from '../components/Ageing.tsx';
+import { ConnectionsPanel } from './Map.tsx';
 import { EVIDENCE_TIERS } from '../format.ts';
 import { bridge, decide, funnel, leverageSentence, matrix, ratios, surface, trafficView, upgrades, verdict } from '../analytics.ts';
 import '../overview.css';
@@ -18,6 +19,8 @@ interface Props {
   /** Findings a person set aside; they are already counted as Track in `report`. */
   accepted: Set<string>;
   go: (page: string, id?: string, query?: Record<string, string>) => void;
+  /** Opens another application (from the connections card). */
+  onOpenTarget: (id: number) => void;
 }
 
 /**
@@ -25,7 +28,7 @@ interface Props {
  * done and how (work queue, fix leverage), where would an attacker get in (surface), and how
  * the decisions follow (matrix). The four decision counts appear once, as the work queue.
  */
-export function Overview({ report, targetId, scans, diff, exceptions, accepted, go }: Props) {
+export function Overview({ report, targetId, scans, diff, exceptions, accepted, go, onOpenTarget }: Props) {
   const [range, setRange] = useState(6);
   const [howOpen, setHowOpen] = useState(false);
   const v = useMemo(() => verdict(report), [report]);
@@ -92,6 +95,13 @@ export function Overview({ report, targetId, scans, diff, exceptions, accepted, 
           <SurfaceTiles tiles={tiles} go={go} days={tv.days} />
         </section>
       </div>
+
+      <section className="card">
+        <div className="card-head">
+          <div className="with-icon"><span className="icon-box"><I.map size={22} /></span><div><h2>Connected applications</h2><p className="sub">What this application calls and what calls it, from its deployment files; the map shows the whole portfolio.</p></div></div>
+        </div>
+        <ConnectionsPanel targetId={targetId} go={go} onOpen={onOpenTarget} />
+      </section>
 
       <section className="card">
         <div className="card-head">

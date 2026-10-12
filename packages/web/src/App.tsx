@@ -9,6 +9,7 @@ import { Evidence } from './views/Evidence.tsx';
 import { Reports } from './views/Reports.tsx';
 import { Apps } from './views/Apps.tsx';
 import { Portfolio } from './views/Portfolio.tsx';
+import { MapView } from './views/Map.tsx';
 import { Settings, applyTheme, readTheme, type SettingsSection, type Theme } from './views/Settings.tsx';
 import { LoginPage, SetupPage } from './views/Auth.tsx';
 import { applyExceptions, latestByFinding, pendingCount } from './exceptions.ts';
@@ -16,8 +17,8 @@ import { dateTime } from './format.ts';
 import './plumbing.css';
 import './team.css';
 
-type Page = 'overview' | 'findings' | 'components' | 'evidence' | 'reports' | 'apps' | 'settings' | 'portfolio';
-const PAGE_IDS: Page[] = ['overview', 'findings', 'components', 'evidence', 'reports', 'apps', 'settings', 'portfolio'];
+type Page = 'overview' | 'findings' | 'components' | 'evidence' | 'reports' | 'apps' | 'settings' | 'portfolio' | 'map';
+const PAGE_IDS: Page[] = ['overview', 'findings', 'components', 'evidence', 'reports', 'apps', 'settings', 'portfolio', 'map'];
 const PAGES: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <I.overview /> },
   { id: 'findings', label: 'Findings', icon: <I.findings /> },
@@ -289,7 +290,7 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
   const selectTarget = async (id: number) => {
     setTargetId(id);
     setError(null);
-    if (route.page === 'apps' || route.page === 'portfolio' || route.id) go('overview');
+    if (route.page === 'apps' || route.page === 'portfolio' || route.page === 'map' || route.id) go('overview');
     await loadTarget(id).catch((e) => setError(message(e)));
   };
 
@@ -378,7 +379,7 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
   const s = viewReport?.summary;
   const actionable = s ? s.byDecision.Act + s.byDecision.Attend : 0;
   const pending = pendingCount(exceptions);
-  const showTabs = !!current && !!report && route.page !== 'portfolio';
+  const showTabs = !!current && !!report && route.page !== 'portfolio' && route.page !== 'map';
   const home = (targets?.length ?? 0) > 1 ? hashFor('portfolio') : hashFor('overview');
 
   const scanningName = scanning ? (scanning.targetId === null ? 'on another server' : targets?.find((t) => t.id === scanning.targetId)?.name ?? 'application') : '';
@@ -387,6 +388,7 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
 
   const railItems: { id: Page; label: string; icon: React.ReactNode }[] = [
     { id: 'portfolio', label: 'Portfolio', icon: <I.portfolio /> },
+    { id: 'map', label: 'Map', icon: <I.map /> },
     { id: 'apps', label: 'Apps', icon: <I.grid /> },
     { id: 'settings', label: 'Settings', icon: <I.settings /> },
   ];
@@ -407,7 +409,7 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
         <header className="topbar">
           <div className="topbar-inner">
             <a className="wordmark" href={home}><Wordmark size={24} /><span>Next<b>Fix</b></span></a>
-            {targets && targets.length > 0 && route.page !== 'portfolio' && (
+            {targets && targets.length > 0 && route.page !== 'portfolio' && route.page !== 'map' && (
               <select className="target-select" aria-label="Application" value={targetId ?? ''} onChange={(e) => selectTarget(Number(e.target.value))}>
                 {targets.map((t) => <option key={t.id} value={t.id}>{t.name ?? t.dir}</option>)}
               </select>
@@ -416,6 +418,7 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
               <nav className="tabs" aria-label="Pages">
                 {PAGES.map((p) => <a key={p.id} className={route.page === p.id ? 'active' : ''} href={hashFor(p.id)}>{p.icon}<span>{p.label}</span>{p.id === 'findings' && pending > 0 && <span className="tab-badge" title={`${pending} exception${pending === 1 ? '' : 's'} awaiting approval`}>{pending}<span className="sr-only"> exceptions awaiting approval</span></span>}</a>)}
                 <a className={`mobile-only ${route.page === 'portfolio' ? 'active' : ''}`} href={hashFor('portfolio')}><I.portfolio size={18} /><span>Portfolio</span></a>
+                <a className={`mobile-only ${route.page === 'map' ? 'active' : ''}`} href={hashFor('map')}><I.map size={18} /><span>Map</span></a>
                 <a className={`mobile-only ${route.page === 'apps' ? 'active' : ''}`} href={hashFor('apps')}><I.grid size={18} /><span>Apps</span></a>
                 <a className={`mobile-only ${route.page === 'settings' ? 'active' : ''}`} href={hashFor('settings')}><I.settings size={18} /><span>Settings</span></a>
               </nav>
@@ -423,6 +426,7 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
             {!showTabs && targets && targets.length > 0 && (
               <nav className="tabs mobile-nav" aria-label="Pages">
                 <a className={`mobile-only ${route.page === 'portfolio' ? 'active' : ''}`} href={hashFor('portfolio')}><I.portfolio size={18} /><span>Portfolio</span></a>
+                <a className={`mobile-only ${route.page === 'map' ? 'active' : ''}`} href={hashFor('map')}><I.map size={18} /><span>Map</span></a>
                 <a className={`mobile-only ${route.page === 'apps' ? 'active' : ''}`} href={hashFor('apps')}><I.grid size={18} /><span>Apps</span></a>
                 <a className={`mobile-only ${route.page === 'settings' ? 'active' : ''}`} href={hashFor('settings')}><I.settings size={18} /><span>Settings</span></a>
               </nav>
@@ -452,7 +456,9 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
           {targets === null ? (
             <p className="empty">Loading…</p>
           ) : route.page === 'portfolio' ? (
-            <Portfolio onOpen={(id) => { selectTarget(id); }} />
+            <Portfolio onOpen={(id) => { selectTarget(id); }} go={go} />
+          ) : route.page === 'map' ? (
+            <MapView onOpen={(id) => { selectTarget(id); }} />
           ) : route.page === 'settings' ? (
             <Settings theme={theme} onTheme={onTheme} health={health} integrations={integrations} onIntegrationsChange={loadIntegrations} settings={settings} onSettingsChange={setSettings} role={role} authMode={session.authMode} me={session.user} section={(route.id as SettingsSection) ?? 'general'} go={go} />
           ) : route.page === 'apps' || !current ? (
@@ -483,7 +489,7 @@ function Dashboard({ session, theme, onTheme, onSignOut }: { session: Session; t
                 )}
                 {canScan && <button type="button" className="btn primary" onClick={rescan} disabled={scanActive}><I.refresh /> {scanActive ? 'Scanning…' : 'Scan again'}</button>}
               </div>
-              {route.page === 'overview' && <Overview report={viewReport} targetId={current.id} scans={scans} diff={diff} exceptions={exceptions} accepted={accepted} go={go} />}
+              {route.page === 'overview' && <Overview report={viewReport} targetId={current.id} scans={scans} diff={diff} exceptions={exceptions} accepted={accepted} go={go} onOpenTarget={selectTarget} />}
               {route.page === 'findings' && <Findings report={viewReport} firstSeen={firstSeen} scanId={lastScan.id} targetId={current.id} selectedId={route.id} query={route.query} tickets={tickets} integrations={integrations} role={role} exceptions={byFinding} accepted={accepted} onSelect={(id) => go('findings', id, route.query)} onQuery={setQuery} onTicketsChange={() => loadTickets(current.id)} onExceptionsChange={() => loadExceptions(current.id)} />}
               {route.page === 'components' && <Components report={viewReport} go={go} />}
               {route.page === 'evidence' && <Evidence report={viewReport} scanId={lastScan.id} query={route.query} exceptions={exceptions} go={go} />}
