@@ -164,3 +164,11 @@
 .tbl.mini { font-size: 0.84rem; }
 .tbl.mini th, .tbl.mini td { padding: 4px 8px; }
 .traffic-public { color: var(--c-act-text); font-weight: 600; }
+
+/* ---------- attack-surface changes under the bridge ---------- */
+.surface-changes { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--grid); }
+.surface-changes h3 { font-size: 0.92rem; margin: 0 0 6px; }
+.surface-change { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; padding: 3px 0; font-size: 0.88rem; line-height: 1.4; }
+.surface-change .link { text-decoration: none; }
+.surface-change .link:hover { text-decoration: underline; }
+.tri.d-muted { color: var(--muted); }

@@ -5,6 +5,46 @@ All notable changes to NextFix are recorded here. Version numbers come from the 
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-12
+
+Exposure observed, not inferred.
+
+### Added
+- **Observed route traffic.** Access logs (nginx and Apache combined, AWS ALB, JSON lines
+  from Caddy, Cloudflare Logpush, Traefik, pino and the like) are read per scan and the last
+  30 days of requests are counted per entry point, split by public and internal addresses.
+  Public traffic on an open route lifts a moderate finding to Act; a route nobody called holds
+  a severity-only Act at Attend; stale or short windows are reported without demoting. Every
+  finding's why says what the logs recorded for its route. Set the logs per application under
+  Apps → edit (`accessLogs`, schema version 8), with `--access-log` and `--traffic-days`, or
+  with `accessLogs` and `trafficWindowDays` in `nextfix.config.json`. The Overview gains a
+  "What the logs say" panel, a funnel row ("Route called from the internet"), a ratio, traffic
+  on every surface tile and in the verdict; Findings gets a traffic filter, tags and a
+  per-route table.
+- **Internet reach.** `exposure.reach` says whether the internet reaches the service, with the
+  evidence: public addresses in the logs, `internetFacing` in the config, or the
+  infrastructure files in the repository (Terraform for AWS, Google Cloud and Azure,
+  CloudFormation, Kubernetes Ingress and LoadBalancer services, compose host bindings,
+  fly.toml, vercel.json, netlify.toml, app.yaml, render.yaml, serverless.yml, a `web:`
+  Procfile, a reverse-proxy `.conf`). An internal-only service holds a severity-only Act at
+  Attend. Shown under the verdict, in a Reach column on the Portfolio, and on the map.
+- **Portfolio map.** Compose files, Kubernetes manifests, `.env` and configuration files name
+  the services each application calls and the names it answers to (`report.links`);
+  `GET /api/portfolio/map` joins them across the portfolio. The new Map page draws the
+  internet on the left, applications layered by their callers, outside services on the right;
+  click an application for its blast radius (what depends on it, what it reaches). The
+  Overview gains a "Connected applications" card.
+- **Attack-surface changes.** Each scan is compared with the previous one for new and removed
+  routes, auth guards added or removed, network and reach changes, published ports, routes
+  that started or stopped taking public traffic, and links added or removed
+  (`ScanDiff.surface`, widening changes first). The Overview lists them under What changed,
+  the Portfolio counts the widening ones per application, and the weekly digest carries a
+  "Surface widened" sentence.
+
+### Changed
+- `GET /api/targets` now returns each application's owner, schedule and access logs.
+- The engine depends on `yaml` for compose and Kubernetes manifests.
+
 ## [1.0.1] — 2026-10-11
 
 ### Added

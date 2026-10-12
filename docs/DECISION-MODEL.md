@@ -16,6 +16,9 @@ does not belong in this file.
 | Entry points (method, path, guards) | Express route registrations, mounts, `app.use(guard)` | reachability, authentication |
 | Request data | each argument's roots (parameters, `req.*`, captured names, through locals and destructuring); tainted names carried parameter-by-parameter along the path | "user input" |
 | Network exposure | Dockerfile `EXPOSE`, compose `ports:`, `app.listen` host | exposure |
+| Observed traffic per route | access logs (nginx/Apache combined, AWS ALB, JSON lines), last 30 days, public vs internal addresses | exposure, observed |
+| Internet reach | public addresses in the logs; `internetFacing` in the config; Terraform, CloudFormation, Kubernetes, compose bindings, platform files | exposure, reach |
+| Service links | compose, Kubernetes manifests, `.env`, configuration files | the portfolio map (no effect on a decision) |
 | EPSS score, KEV membership | FIRST, CISA | exploitation |
 
 ## 2. Reachability tiers (evaluated in order)
@@ -113,8 +116,18 @@ exposure standing in for "mission & well-being".
 | imported-unknown-symbol | exploitation ≠ none **or** CVSS ≥ 7 → Attend, else | **Track\*** |
 | image-only | exploitation = active, **or** (a fix exists **and** (exploitation = likely **or** CVSS ≥ 7)) → Attend, else | **Track\*** |
 | called-unreached | exploitation = active → Attend, else | **Track\*** |
-| reachable, unauthenticated | exploitation ≠ none **or** CVSS ≥ 9 **or** (user input **and** CVSS ≥ 7) → **Act**, else | **Attend** |
+| reachable, unauthenticated | exploitation ≠ none **or** CVSS ≥ 9 **or** (user input **and** CVSS ≥ 7) **or** (public traffic on the route **and** (CVSS ≥ 7 **or** (user input **and** CVSS ≥ 5))) → **Act**, else | **Attend** |
 | reachable, authenticated | exploitation = active → **Act**, else | **Attend** |
+
+Two observations hold a severity-only **Act** (exploitation = none) at **Attend**, and the
+why line says which:
+
+| Observation | Condition |
+|---|---|
+| Nobody called the route | access logs were read, every route to the call took 0 requests, the window is at least 14 days, the logs end within a month of the scan, and the logs matched at least one route of this service |
+| Not reachable from the internet | `exposure.reach` is `internal` (declared, or infrastructure files say so, or 14+ days of current logs with no public address) and the route took no public traffic |
+
+Neither applies with active or likely exploitation: known exploitation keeps Act.
 
 Meanings follow SSVC: **Act** = fix now, out of cycle; **Attend** = fix in the next cycle,
 tell the owner; **Track\*** = watch closely, re-check on new exploit data; **Track** = no
@@ -132,10 +145,42 @@ reach     = reachable 1.0 · called-unreached 0.55 · imported-unknown-symbol 0.
             · image-only 0.5 · imported-not-called 0.2 · unused 0.1 · dev-only 0.05
 auth      = reachable & authenticated → × 0.75
 local     = network local-only → × 0.5
-score     = base × reach × auth × local + EPSS × 20 + (KEV ? 15 : 0) + (user input ? 5 : 0)
+observed  = reachable: public traffic on the open route → + 5 · nobody called any route (usable window) → × 0.7
+reach     = reachable & internal-only service, no public traffic → × 0.8
+score     = base × reach × auth × local × observed × reach + EPSS × 20 + (KEV ? 15 : 0) + (user input ? 5 : 0)
 ```
 
 The score never changes a decision; it orders findings within a decision.
+
+## 5a. Observed exposure (1.1)
+
+Exposure used to be inferred from files alone. Three readers now add what is actually
+happening, each with the evidence it came from:
+
+- **Traffic.** `accessLogs` in `nextfix.config.json` (inside the project), `--access-log`,
+  or the application's settings in the dashboard name the access logs. Each line is reduced to
+  method, path, client address and time; the last 30 days (`trafficWindowDays`,
+  `--traffic-days`) are counted per entry point, matched by method and route pattern (Express
+  `:id`, Flask `<int:id>`, FastAPI `{id}`, Django regexes, Go `{id}`). Public means outside
+  private, loopback, link-local, carrier-grade NAT and unique-local ranges; the first address
+  in `X-Forwarded-For` wins when a JSON line carries it. Compressed rotations are skipped. Logs
+  taken behind a proxy that does not forward the client address show only private addresses,
+  which is why internal-only observation never outranks infrastructure that says internet.
+- **Internet reach.** Public traffic settles it. Otherwise `internetFacing` in the config,
+  then the infrastructure files: Terraform (`aws_security_group` ingress from `0.0.0.0/0`,
+  `aws_lb` internal or not, API Gateway, CloudFront, Lambda URLs, `google_compute_firewall`,
+  Cloud Run ingress, Azure NSG rules, public IPs, App Service), CloudFormation (the same
+  resource types), Kubernetes (Ingress, LoadBalancer services and their internal annotations,
+  Gateway API, Istio), compose host bindings (`127.0.0.1:` is internal), fly.toml, vercel.json,
+  netlify.toml, app.yaml, render.yaml, serverless.yml HTTP events, a `web:` Procfile, and a
+  reverse-proxy `.conf` listening on 80 or 443. Any internet signal wins over internal signals;
+  unknown never overwrites a verdict.
+- **Links.** Compose `depends_on`, `links` and environment values, Kubernetes container
+  environment and ConfigMaps, `.env*` files and configuration files (JSON, YAML, TOML, INI,
+  `.conf`, `.properties`) are read for URLs and `*_HOST` values. Self-naming keys
+  (`PUBLIC_URL`, `HOST`, ingress hosts, `server_name`) become the application's identity so
+  other applications' links resolve to it on the map. Placeholders (`localhost`, `example.com`,
+  templated values) are dropped; a dotted public-looking host is "outside".
 
 ## 6. OpenVEX mapping
 

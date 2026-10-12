@@ -43,6 +43,14 @@ In the footer: "NextFix and the NextFix logo are trademarks of GRCSAC LLC."
   Slack or Teams, API tokens, audit log.
 - Pipelines: `--fail-on Act` exit code, SARIF for GitHub code scanning, a ready-made
   GitHub Actions workflow with a pull-request comment.
+- Since 1.1, exposure is observed, not inferred: access logs (nginx, Apache, AWS ALB, Caddy,
+  Cloudflare, Traefik, pino) are counted per route over the last 30 days, so the dashboards say
+  which open routes the internet is actually calling and which nobody has called; infrastructure
+  files (Terraform, CloudFormation, Kubernetes, compose, fly.io, Vercel, Netlify) say whether the
+  internet reaches the service at all; the Map page draws every application, what it calls and
+  what calls it, with a one-click blast radius; and each scan reports what changed on the attack
+  surface (new open routes, guards removed, new exposure, new public traffic). Nothing is
+  installed and the logs never leave the machine.
 - No telemetry, no account with us, no phone-home. Outbound hosts: osv.dev, api.first.org,
   cisa.gov, github.com (fix commits), and only the trackers or identity provider you configure.
 

@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Decision, Finding, InternetReach, ScanReport, ScanSummary } from '../../../engine/src/types.ts';
 import { FeatureError, type Route } from './core.ts';
-import { activeExceptions, applyExceptions, isInForce, latestReport, targetExists } from './exceptions.ts';
+import { activeExceptions, applyExceptions, isInForce, latestReport, previousReport, targetExists } from './exceptions.ts';
+import { surfaceDiff, wideningCount } from '../diff.ts';
 import { MAX_LOG_PATH, MAX_LOG_SOURCES, parseAccessLogs } from './surface.ts';
 
 /*
@@ -49,6 +50,8 @@ export interface PortfolioRow {
   pendingExceptions: number;
   /** Internet reach from the latest report; absent for reports written before 1.1. */
   reach?: InternetReach;
+  /** Surface changes since the previous scan that widen the surface (new open routes, guards removed, new exposure). */
+  surfaceChanges: number;
 }
 
 export const DECISION_ORDER: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
@@ -234,7 +237,7 @@ export function portfolioRow(db: DatabaseSync, target: TargetMeta, sla: SlaDays,
   const served = servedReport(db, target.id, now);
   const pending = activeExceptions(db, target.id, now).filter((e) => e.status === 'pending').length;
   if (!served) {
-    return { ...target, posture: 'Never scanned', headline: 'Not scanned yet.', byDecision: { ...DECISION_ZERO }, exposedSurface: { open: 0, total: 0 }, trend: [], pendingExceptions: pending };
+    return { ...target, posture: 'Never scanned', headline: 'Not scanned yet.', byDecision: { ...DECISION_ZERO }, exposedSurface: { open: 0, total: 0 }, trend: [], pendingExceptions: pending, surfaceChanges: 0 };
   }
   const { report } = served;
   const v = verdict(report);
@@ -251,6 +254,7 @@ export function portfolioRow(db: DatabaseSync, target: TargetMeta, sla: SlaDays,
     trend: trend(db, target.id),
     pendingExceptions: pending,
     reach: report.exposure.reach,
+    surfaceChanges: wideningCount(surfaceDiff(report, previousReport(db, target.id, served.scanId))),
   };
 }
 

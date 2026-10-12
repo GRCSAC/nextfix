@@ -67,6 +67,11 @@ read a CycloneDX, SPDX or Grype JSON document you already have (see
 [Container images](#container-images)). `--sarif <file>` writes SARIF 2.1.0 for GitHub code
 scanning; a ready-made workflow with a pull-request comment is in [docs/ci](docs/ci/README.md).
 
+Add `--access-log <file-or-folder>` (or `accessLogs` in the config) and the last 30 days of
+requests are counted per route: exposure becomes observed rather than inferred, routes the
+internet is calling rise, routes nobody has called are held, and each finding says how many
+requests reached it (see [Observed exposure](#observed-exposure-traffic-internet-reach-and-the-map)).
+
 In a pipeline, `--fail-on Act` (or `Attend`) exits with code 3 when any finding is decided
 that or worse, so a build can gate on "nothing to fix now" while the JSON report is kept as
 an artefact. Exit codes: 0 ok, 1 error, 2 usage, 3 gate failed.
@@ -176,14 +181,48 @@ Optional `nextfix.config.json` in the project root:
   "ignore": ["scripts", "tools"],
   "internalRoutes": ["GET /healthz", "GET /metrics"],
   "image": "ghcr.io/example/shop:1.4",
-  "sbom": ["build/shop.cdx.json"]
+  "sbom": ["build/shop.cdx.json"],
+  "accessLogs": ["logs/nginx"],
+  "trafficWindowDays": 30,
+  "internetFacing": true
 }
 ```
 
 `authGuards` are regular expressions added to the built-in guard names (`authGuardsReplace: true`
 replaces them). `internalRoutes` are treated as authenticated. `image` and `sbom` take one
 reference or a list; `syft` names the syft binary when it is not on the PATH (or `"docker"`
-to always use the container).
+to always use the container). `accessLogs` lists files or folders of access logs inside the
+project (paths outside it go on the command line or in the application's settings);
+`trafficWindowDays` is the window counted (default 30); `internetFacing` declares internet
+reach when the infrastructure files live in another repository.
+
+### Observed exposure: traffic, internet reach and the map
+
+Exposure used to be read from the Dockerfile, the compose file and the code's auth guards. Since
+1.1 three more sources say what is actually happening, and every finding quotes them:
+
+- **Access logs.** nginx and Apache combined logs, AWS ALB logs, and JSON lines (Caddy,
+  Cloudflare Logpush, Traefik, pino) are read on the machine NextFix runs on; nothing is
+  installed and only the counts are kept. The last 30 days are counted per route, split by
+  public and internal addresses. Public traffic on an open route lifts a moderate finding to
+  **Fix now**; a route nobody called holds a severity-only Fix now at **Fix next cycle**; stale
+  or short windows are reported without changing a decision. Point an application at its logs
+  under Apps → edit, with `--access-log`, or with `accessLogs` in the config.
+- **Internet reach.** Public addresses in the logs, `internetFacing` in the config, or the
+  infrastructure files in the repository (Terraform for AWS, Google Cloud and Azure,
+  CloudFormation, Kubernetes Ingress and LoadBalancer services, compose host bindings, fly.toml,
+  vercel.json, netlify.toml, app.yaml, render.yaml, serverless.yml, a `web:` Procfile, a
+  reverse-proxy configuration) decide whether the internet reaches the service, with the file
+  as evidence. An internal-only service holds a severity-only Fix now at Fix next cycle.
+- **The map.** Compose files, Kubernetes manifests, `.env` and configuration files name the
+  services each application calls; the Map page draws the portfolio with the internet on the
+  left, applications layered by their callers and outside services on the right. Click an
+  application for its blast radius: what depends on it and what it reaches. The Overview shows
+  the same for one application, and the Portfolio gains a Reach column.
+- **Surface changes.** Each scan is compared with the previous one for new or removed routes,
+  guards added or removed, ports and exposure changes, routes that started taking public
+  traffic, and new links; the Overview lists them under What changed, the Portfolio counts the
+  widening ones, and the weekly digest reports them.
 
 ### Container images
 
@@ -286,6 +325,10 @@ folder of challenge snippets that re-declare the server's routes without their i
 | Request-data tracing, argument by argument along the path | ✅ |
 | Reachability tiers + SSVC-style decision + score | ✅ |
 | Docker / compose exposure | ✅ |
+| Observed traffic from access logs (combined, ALB, JSON lines), per route, in the decision and the dashboards | ✅ |
+| Internet reach from Terraform, CloudFormation, Kubernetes, compose bindings and platform files, or declared | ✅ |
+| Service links from compose, Kubernetes, .env and config files; portfolio map with blast radius | ✅ |
+| Attack-surface changes between scans (routes, guards, exposure, traffic, links) in the Overview, Portfolio and digest | ✅ |
 | OpenVEX + JSON report | ✅ |
 | Vulnerable-symbol data | ✅ curated seed (7 advisories) + derived from fix commits |
 | Derived symbols from fix commits, with a review and export path | ✅ |

@@ -1,5 +1,6 @@
 import type { Decision, ScanReport } from '../api.ts';
 import { DECISIONS, DECISION_META, advisoryName, compact, dateTime, pct, shortDate, trafficPhrase } from '../format.ts';
+import type { SurfaceChange } from '../api.ts';
 import { MATRIX_COLS, MATRIX_ROWS, cellLabel, type Bridge, type Decide, type FunnelRow, type MatrixCell, type SurfaceTile, type TrafficView, type Upgrade, type Verdict } from '../analytics.ts';
 import { KIND_META } from '../exceptions.ts';
 import { I } from './Icons.tsx';
@@ -143,7 +144,7 @@ export function BridgeChart({ b, go }: { b: Bridge; go: Go }) {
   );
   return (
     <div className="bridge-wrap">
-      {noChange && <p className="bridge-same">No change since {dateTime(b.previous.at)}.</p>}
+      {noChange && <p className="bridge-same">{b.surface.length ? `No finding changed since ${dateTime(b.previous.at)}, but the surface did.` : `No change since ${dateTime(b.previous.at)}.`}</p>}
       <div className="bridge" role="img" aria-label={`From ${b.previous.findings} findings to ${b.current}: ${b.added.length} new, ${b.resolved.length} resolved, ${b.escalated.length} escalated, ${b.deescalated.length} de-escalated`}>
         {col('Previous scan', b.previous.findings, '', 'neutral', dateTime(b.previous.at))}
         {col('New', b.added.length, '+', 'act')}
@@ -159,6 +160,38 @@ export function BridgeChart({ b, go }: { b: Bridge; go: Go }) {
           <ChangeList title="Re-decided" items={[...b.escalated, ...b.deescalated].map((c) => ({ id: c.finding.id, text: `${c.finding.component.name} · ${advisoryName(c.finding)}`, tag: `${DECISION_META[c.from].short} → ${DECISION_META[c.to].short}${c.reasons?.length ? ` · ${c.reasons[0]}` : ''}` }))} go={go} />
         </div>
       )}
+      <SurfaceChanges changes={b.surface} go={go} />
+    </div>
+  );
+}
+
+const LEVEL_META: Record<SurfaceChange['level'], { icon: string; cls: string; label: string }> = {
+  act: { icon: '▲', cls: 'act', label: 'widens the surface where it hurts' },
+  attend: { icon: '●', cls: 'attend', label: 'widens the surface' },
+  info: { icon: '○', cls: 'muted', label: 'changed' },
+  good: { icon: '✓', cls: 'good', label: 'narrows the surface' },
+};
+
+/** Routes, guards, exposure, traffic and links that changed between the two scans; findings are counted, not the other way round. */
+export function SurfaceChanges({ changes, go }: { changes: SurfaceChange[]; go: Go }) {
+  if (!changes.length) return null;
+  const widening = changes.filter((c) => c.level === 'act' || c.level === 'attend').length;
+  return (
+    <div className="surface-changes">
+      <h3>Attack surface <span className="muted">{changes.length} change{changes.length === 1 ? '' : 's'}{widening ? ` · ${widening} widening` : ''}</span></h3>
+      <ul className="plain">
+        {changes.slice(0, 8).map((c, i) => {
+          const m = LEVEL_META[c.level];
+          return (
+            <li key={i} className={`surface-change l-${m.cls}`}>
+              <span className={`tri d-${m.cls}`} aria-hidden="true">{m.icon}</span>
+              {c.route && c.findings ? <button type="button" className="link" onClick={() => go('findings', undefined, { q: c.route!.split(' ')[1] ?? c.route })}>{c.text}</button> : <span>{c.text}</span>}
+              <span className="sr-only"> ({m.label})</span>
+            </li>
+          );
+        })}
+        {changes.length > 8 && <li className="muted small">and {changes.length - 8} more</li>}
+      </ul>
     </div>
   );
 }

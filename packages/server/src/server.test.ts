@@ -489,8 +489,8 @@ test('diff: reasons for tier, decision, fix, KEV and request data; PyPI names co
   const y = d.changed.find((c) => c.finding.id === Y)!;
   assert.deepEqual(y.reasons, ['decision Act → Attend', 'left KEV', 'request data no longer reaches it']);
   assert.equal(d.changed.some((c) => c.finding.id.startsWith('pkg:pypi/')), false, 'the renamed PyPI finding is unchanged');
-  assert.deepEqual(d.summary, { added: 1, resolved: 1, escalated: 1, deescalated: 1 });
-  assert.deepEqual(diffReports(cur, undefined).summary, { added: 0, resolved: 0, escalated: 0, deescalated: 0 });
+  assert.deepEqual(d.summary, { added: 1, resolved: 1, escalated: 1, deescalated: 1, surface: 0 });
+  assert.deepEqual(diffReports(cur, undefined).summary, { added: 0, resolved: 0, escalated: 0, deescalated: 0, surface: 0 });
 });
 
 test('scan progress shows the stage, DELETE /api/scan cancels, nothing is stored', async () => {

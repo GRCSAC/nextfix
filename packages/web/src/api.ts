@@ -192,12 +192,24 @@ export interface ChangedFinding {
   reasons: string[];
 }
 
+export type SurfaceLevel = 'act' | 'attend' | 'info' | 'good';
+/** One change to the attack surface between two scans: routes, guards, exposure, traffic, links. */
+export interface SurfaceChange {
+  kind: string;
+  level: SurfaceLevel;
+  text: string;
+  route?: string;
+  findings?: number;
+}
+
 export interface ScanDiff {
   previous?: ScanMeta;
   added: Finding[];
   resolved: Finding[];
   changed: ChangedFinding[];
-  summary: { added: number; resolved: number; escalated: number; deescalated: number };
+  /** Surface changes, widening ones first (absent from servers before 1.1). */
+  surface?: SurfaceChange[];
+  summary: { added: number; resolved: number; escalated: number; deescalated: number; surface?: number };
 }
 
 /** POST /api/targets/:id/redecide: the latest report re-decided with current EPSS/KEV; nothing is stored. */

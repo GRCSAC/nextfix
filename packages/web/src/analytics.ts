@@ -1,4 +1,4 @@
-import type { Decision, EntryPoint, Exception, Finding, ReachTier, RouteTraffic, ScanDiff, ScanReport, TrafficFile } from './api.ts';
+import type { Decision, EntryPoint, Exception, Finding, ReachTier, RouteTraffic, ScanDiff, ScanReport, SurfaceChange, TrafficFile } from './api.ts';
 import { DECISIONS, DECISION_META, bestPath, compact, pct } from './format.ts';
 import { compareVersions } from '../../engine/src/vulns/ecosystems.ts';
 
@@ -315,6 +315,8 @@ export interface Bridge {
   resolved: Finding[];
   escalated: { finding: Finding; from: Decision; to: Decision; reasons?: string[] }[];
   deescalated: { finding: Finding; from: Decision; to: Decision; reasons?: string[] }[];
+  /** Attack-surface changes since the previous scan, widening ones first. */
+  surface: SurfaceChange[];
 }
 
 export function bridge(report: ScanReport, diff?: ScanDiff): Bridge {
@@ -326,6 +328,7 @@ export function bridge(report: ScanReport, diff?: ScanDiff): Bridge {
     resolved: diff?.resolved ?? [],
     escalated: changed.filter((c) => order(c.to) < order(c.from)),
     deescalated: changed.filter((c) => order(c.to) > order(c.from)),
+    surface: diff?.surface ?? [],
   };
 }
 

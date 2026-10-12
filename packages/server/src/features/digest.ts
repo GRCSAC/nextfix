@@ -6,9 +6,9 @@ import { randomBytes } from 'node:crypto';
 import type { Decision, Finding, ScanReport } from '../../../engine/src/types.ts';
 import { compareVersions } from '../../../engine/src/vulns/ecosystems.ts';
 import { toolVersion } from '../../../engine/src/version.ts';
-import { diffReports } from '../diff.ts';
+import { diffReports, surfaceDiff } from '../diff.ts';
 import { FeatureError, settingsFor, type Route, type SettingsAccess } from './core.ts';
-import { activeExceptions, isInForce, type ExceptionRow } from './exceptions.ts';
+import { activeExceptions, isInForce, previousReport, type ExceptionRow } from './exceptions.ts';
 import { DECISION_ORDER, listTargetMeta, servedReport, slaBreaches, slaSettings, verdict, type Posture, type TargetMeta } from './portfolio.ts';
 
 /*
@@ -281,11 +281,18 @@ export function lastDigestSentAt(db: DatabaseSync): string | undefined {
   return r?.sent_at;
 }
 
-function previousReport(db: DatabaseSync, targetId: number, scanId: number): ScanReport | undefined {
-  const cur = db.prepare('SELECT created_at FROM scans WHERE id = ?').get(scanId) as { created_at: string } | undefined;
-  if (!cur) return undefined;
-  const r = db.prepare('SELECT report FROM scans WHERE target_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT 1').get(targetId, cur.created_at, cur.created_at, scanId) as { report: string } | undefined;
-  return r ? (JSON.parse(r.report) as ScanReport) : undefined;
+/** What changed on the attack surface since the previous scan, for the digest: widening changes first, three at most. */
+export function surfaceSentence(db: DatabaseSync, targetId: number, scanId: number, report: ScanReport): string | undefined {
+  const prev = previousReport(db, targetId, scanId);
+  if (!prev) return undefined;
+  const changes = surfaceDiff(report, prev);
+  if (!changes.length) return undefined;
+  const widening = changes.filter((c) => c.level === 'act' || c.level === 'attend');
+  const narrowing = changes.filter((c) => c.level === 'good');
+  const head = widening.length ? `Surface widened: ${widening.slice(0, 3).map((c) => c.text).join('; ')}${widening.length > 3 ? `; and ${widening.length - 3} more` : ''}.` : '';
+  const tail = narrowing.length ? ` Narrowed: ${narrowing.slice(0, 2).map((c) => c.text).join('; ')}${narrowing.length > 2 ? `; and ${narrowing.length - 2} more` : ''}.` : '';
+  const other = !widening.length && !narrowing.length ? `Surface: ${changes.slice(0, 2).map((c) => c.text).join('; ')}.` : '';
+  return (head + tail + other).trim();
 }
 
 /** Findings the nightly re-decide pass moved towards Act since `since` (the schedule module writes the rows). */
@@ -349,7 +356,7 @@ export function digestApp(db: DatabaseSync, target: TargetMeta, base: string, si
     return { id: target.id, name: target.name, owner: target.owner, url, posture: 'Never scanned', verdict: 'Not scanned yet; add a schedule or run a scan.', lines };
   }
   const v = verdict(served.report);
-  const lines = [bridgeSentence(db, target, served.scanId, served.report, since), leverageSentence(served.report), slaSentence(db, target.id, served.report, nowMs), exceptionSentence(exceptions, nowMs)].filter((x): x is string => !!x);
+  const lines = [bridgeSentence(db, target, served.scanId, served.report, since), surfaceSentence(db, target.id, served.scanId, served.report), leverageSentence(served.report), slaSentence(db, target.id, served.report, nowMs), exceptionSentence(exceptions, nowMs)].filter((x): x is string => !!x);
   return { id: target.id, name: target.name, owner: target.owner, url, posture: v.posture, verdict: v.headline, detail: v.detail, lines };
 }
 

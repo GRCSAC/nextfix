@@ -12,7 +12,7 @@
  */
 import type {
   ApiToken, AuditRow, Component, Decision, DigestSettings, EntryPoint, Exception, ExceptionKind, Finding, History, Integrations, ListReport,
-  ExternalNode, InternetReach, MapEdge, MapNode, OidcProvider, Portfolio, PortfolioMap, PortfolioTarget, ReachTier, Role, ScanDiff, ScanMeta, ScanReport, ScanSummary, Session, Settings, Target, TicketMap, User,
+  ExternalNode, InternetReach, MapEdge, MapNode, OidcProvider, Portfolio, PortfolioMap, PortfolioTarget, ReachTier, Role, ScanDiff, ScanMeta, ScanReport, ScanSummary, Session, Settings, SurfaceChange, Target, TicketMap, User,
 } from './api.ts';
 
 const VERSION = '0.10.0-mock';
@@ -303,7 +303,13 @@ function diffFor(t: MockTarget, scanId: number): ScanDiff | null {
   const resolved = prev.report.findings.filter((f) => !curIds.has(f.id));
   const changed = cur.findings.filter((f) => prevIds.has(f.id) && prevIds.get(f.id)!.decision !== f.decision).map((f) => ({ finding: f, from: prevIds.get(f.id)!.decision, to: f.decision, reasons: ['EPSS rose above 10%'] }));
   const order: Decision[] = ['Act', 'Attend', 'Track*', 'Track'];
-  return { previous: prev.meta, added, resolved, changed, summary: { added: added.length, resolved: resolved.length, escalated: changed.filter((c) => order.indexOf(c.to) < order.indexOf(c.from)).length, deescalated: changed.filter((c) => order.indexOf(c.to) > order.indexOf(c.from)).length } };
+  const surface: SurfaceChange[] = t.target.id === 1 ? [
+    { kind: 'route-added', level: 'act', text: 'New route without a login: POST /export (reaches 1 finding, worst Fix now)', route: 'POST /export', findings: 1 },
+    { kind: 'traffic-public', level: 'attend', text: 'Public traffic has started on GET /orders: 2,790 requests from public addresses; reaches 1 finding, worst Fix next cycle', route: 'GET /orders', findings: 1 },
+    { kind: 'link-added', level: 'info', text: 'Now calls search: .env.example: SEARCH_HOST=search' },
+    { kind: 'guard-added', level: 'good', text: 'POST /admin/upload is now behind requireAuth', route: 'POST /admin/upload', findings: 1 },
+  ] : [];
+  return { previous: prev.meta, added, resolved, changed, surface, summary: { added: added.length, resolved: resolved.length, escalated: changed.filter((c) => order.indexOf(c.to) < order.indexOf(c.from)).length, deescalated: changed.filter((c) => order.indexOf(c.to) > order.indexOf(c.from)).length, surface: surface.filter((s) => s.level === 'act' || s.level === 'attend').length } };
 }
 
 function historyFor(t: MockTarget): History {

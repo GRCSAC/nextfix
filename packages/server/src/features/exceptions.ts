@@ -184,6 +184,14 @@ export function latestReport(db: DatabaseSync, targetId: number): { scanId: numb
   return { scanId: r.id, report: JSON.parse(r.report) as ScanReport };
 }
 
+/** The report stored before `scanId` for the same target, or undefined for a first scan. */
+export function previousReport(db: DatabaseSync, targetId: number, scanId: number): ScanReport | undefined {
+  const cur = db.prepare('SELECT created_at FROM scans WHERE id = ?').get(scanId) as { created_at: string } | undefined;
+  if (!cur) return undefined;
+  const r = db.prepare('SELECT report FROM scans WHERE target_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT 1').get(targetId, cur.created_at, cur.created_at, scanId) as { report: string } | undefined;
+  return r ? (JSON.parse(r.report) as ScanReport) : undefined;
+}
+
 export function targetExists(db: DatabaseSync, targetId: number): boolean {
   return !!db.prepare('SELECT 1 FROM targets WHERE id = ?').get(targetId);
 }

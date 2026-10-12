@@ -154,3 +154,10 @@ simply becomes features in the open repo.
 - Launch: `docs/LAUNCH.md`. Website `nextfix.grcsac.com` updated (brand kit in
   `docs/BRAND.md`); everything free. Launch-day evidence of first use of the NextFix™ mark
   saved (see `docs/TRADEMARK.md`), then the repository goes public on the owner's word.
+
+## 1.1 — Observed exposure (done 2026-10-12)
+
+Access logs counted per route (public vs internal, last 30 days) feeding the decision and
+every dashboard; internet reach from infrastructure files or a declaration; service links
+from deployment files and a portfolio map with blast radius; attack-surface changes between
+scans in the Overview, Portfolio and digest. See CHANGELOG 1.1.0 and DECISION-MODEL §5a.
