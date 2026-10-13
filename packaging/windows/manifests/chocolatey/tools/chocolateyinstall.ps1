@@ -1,15 +1,15 @@
 $ErrorActionPreference = 'Stop'
 
 # Downloads the signed installer from the GitHub release rather than embedding it. The checksum
-# is the SHA256 of the signed NextFix-Setup-1.0.0.exe, the same value published in the
+# is the SHA256 of the signed NextFix-Setup-1.1.0.exe, the same value published in the
 # release's SHA256SUMS, filled in by packaging/windows/refresh-manifests.mjs from the staged
 # file so the package and the published asset agree by construction.
 
 $packageArgs = @{
   packageName    = 'nextfix'
   fileType       = 'exe'
-  url64bit       = 'https://github.com/GRCSAC/nextfix/releases/download/v1.0.0/NextFix-Setup-1.0.0.exe'
-  checksum64     = 'D87649E9C65F73458632614675AC22BD57B0CD2A235B1B4ABA4551247BB032B5'
+  url64bit       = 'https://github.com/GRCSAC/nextfix/releases/download/v1.1.0/NextFix-Setup-1.1.0.exe'
+  checksum64     = '68647AC97274D662DD5C0C78B0B6F25FB6C6190A167CDC6053ABBDBF0AEEF7C2'
   checksumType64 = 'sha256'
 
   # Inno Setup. /SP- suppresses the "This will install..." prompt that /VERYSILENT does not.

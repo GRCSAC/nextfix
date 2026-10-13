@@ -8,14 +8,14 @@ This package does NOT embed any binary. It downloads the official installer from
 GitHub release over HTTPS and verifies it against the checksum in tools/chocolateyinstall.ps1
 before running it.
 
-Package:   nextfix 1.0.0
+Package:   nextfix 1.1.0
 Publisher: GRCSAC (GRCSAC LLC)
 Software:  https://nextfix.grcsac.com
 Source:    https://github.com/GRCSAC/nextfix (Apache-2.0)
 
 DOWNLOAD LOCATION
 -----------------
-  https://github.com/GRCSAC/nextfix/releases/download/v1.0.0/NextFix-Setup-1.0.0.exe
+  https://github.com/GRCSAC/nextfix/releases/download/v1.1.0/NextFix-Setup-1.1.0.exe
 
 This URL is version-pinned: each release is published at its own URL and the file behind it
 does not change when a new version ships.
@@ -23,28 +23,28 @@ does not change when a new version ships.
 CHECKSUM
 --------
   Type:   SHA256
-  Value:  D87649E9C65F73458632614675AC22BD57B0CD2A235B1B4ABA4551247BB032B5
+  Value:  68647AC97274D662DD5C0C78B0B6F25FB6C6190A167CDC6053ABBDBF0AEEF7C2
 
 To verify for yourself:
 
   1. Download the installer from the URL above.
   2. Compute its checksum:
 
-       Get-FileHash .\NextFix-Setup-1.0.0.exe -Algorithm SHA256
+       Get-FileHash .\NextFix-Setup-1.1.0.exe -Algorithm SHA256
 
      or, using the Chocolatey tooling:
 
-       checksum -t sha256 -f .\NextFix-Setup-1.0.0.exe
+       checksum -t sha256 -f .\NextFix-Setup-1.1.0.exe
 
   3. Compare it against the value above and against the SHA256SUMS file attached to the same
-     GitHub release (https://github.com/GRCSAC/nextfix/releases/tag/v1.0.0).
+     GitHub release (https://github.com/GRCSAC/nextfix/releases/tag/v1.1.0).
 
 AUTHENTICODE SIGNATURE
 ----------------------
 The installer, and the nextfix.exe it installs, are Authenticode-signed through Microsoft
 Trusted Signing. You can confirm the publisher independently of any checksum:
 
-  Get-AuthenticodeSignature .\NextFix-Setup-1.0.0.exe | Format-List Status, SignerCertificate
+  Get-AuthenticodeSignature .\NextFix-Setup-1.1.0.exe | Format-List Status, SignerCertificate
 
 Expected:
 

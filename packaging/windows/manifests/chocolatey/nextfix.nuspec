@@ -8,7 +8,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>nextfix</id>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <packageSourceUrl>https://github.com/GRCSAC/nextfix/tree/main/packaging/windows/manifests/chocolatey</packageSourceUrl>
     <owners>GRCSAC</owners>
 
@@ -16,13 +16,14 @@
     <authors>GRCSAC</authors>
     <projectUrl>https://nextfix.grcsac.com</projectUrl>
     <projectSourceUrl>https://github.com/GRCSAC/nextfix</projectSourceUrl>
-    <iconUrl>https://cdn.jsdelivr.net/gh/GRCSAC/nextfix@v1.0.0/packaging/icons/nextfix-256.png</iconUrl>
+    <!-- Chocolatey moderation rejects raw.githubusercontent.com icons; jsDelivr serves the file from the release tag. -->
+    <iconUrl>https://cdn.jsdelivr.net/gh/GRCSAC/nextfix@v1.1.0/packaging/icons/nextfix-256.png</iconUrl>
     <copyright>Copyright (c) 2026 GRCSAC LLC</copyright>
     <licenseUrl>https://github.com/GRCSAC/nextfix/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <docsUrl>https://github.com/GRCSAC/nextfix#readme</docsUrl>
     <bugTrackerUrl>https://github.com/GRCSAC/nextfix/issues</bugTrackerUrl>
-    <releaseNotes>https://github.com/GRCSAC/nextfix/releases/tag/v1.0.0</releaseNotes>
+    <releaseNotes>https://github.com/GRCSAC/nextfix/releases/tag/v1.1.0</releaseNotes>
     <tags>nextfix security vulnerability vulnerability-management sca sbom vex sarif reachability devsecops appsec cve cli</tags>
 
     <summary>Tells you which of an application's vulnerabilities to fix next, and why. Scanners find. NextFix decides.</summary>
