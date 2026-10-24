@@ -16,6 +16,22 @@ updates:
       # Type definitions follow the Node version NextFix runs on (24), not the newest Node.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+  # The demonstration application and the lockfile fixtures are vulnerable on purpose: their
+  # versions are what the walkthrough and the engine tests reason about. No updates of any kind.
+  - package-ecosystem: npm
+    directory: /samples/express-shop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+  - package-ecosystem: npm
+    directory: /packages/engine/test-fixtures/yarn-app
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
   - package-ecosystem: github-actions
     directory: /
     schedule:
